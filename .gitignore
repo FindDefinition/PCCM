@@ -127,3 +127,25 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+.vscode
+
+node_modules
+.next
+package-lock.json
+*.log
+yarn.lock
+
+*_pb.js
+*_pb.d.ts
+*_pb.ts
+*Pb.ts
+
+*.pb.cc
+*.pb.h
+docs_out
+
+*.exp
+*.lib
+
+__version__.py
