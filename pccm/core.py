@@ -451,13 +451,13 @@ class Class(object):
                     "::".join(dep.namespace.split(".")), dep.class_name)
                 ns_stmt = "using {} = {};".format(dep.class_name, name_with_ns)
                 dep_alias.append(ns_stmt)
-
-        for k, v in self._param_class.items():
-            p_ns = v.namespace
-            assert p_ns is not None
-            ns_stmt = "namespace {} = {};".format(k,
-                                                  "::".join(p_ns.split(".")))
-            dep_alias.append(ns_stmt)
+        # error in msvc.
+        # for k, v in self._param_class.items():
+        #     p_ns = v.namespace
+        #     assert p_ns is not None
+        #     ns_stmt = "namespace {} = {};".format(k,
+        #                                           "::".join(p_ns.split(".")))
+        #     dep_alias.append(ns_stmt)
 
         typedef_strs = [d.to_string() for d in self._typedefs]
         sc_strs = [d.to_string() for d in self._static_consts]
