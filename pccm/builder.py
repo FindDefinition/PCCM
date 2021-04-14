@@ -15,6 +15,7 @@ def build_pybind(cus: List[Class],
                  std="c++14",
                  disable_hash=True,
                  load_library=True,
+                 pybind_file_suffix: str = ".cc",
                  additional_cflags: Optional[Dict[str, List[str]]] = None,
                  msvc_deps_prefix="Note: including file:",
                  build_dir: Optional[Union[str, Path]] = None,
@@ -26,7 +27,7 @@ def build_pybind(cus: List[Class],
         includes = []
     build_dir = Path(build_dir)
     build_dir.mkdir(exist_ok=True)
-    pb = pybind.Pybind11(mod_name, mod_name)
+    pb = pybind.Pybind11(mod_name, mod_name, pybind_file_suffix)
     cg = CodeGenerator([pb])
     cg.build_graph(cus)
     header_dict, impl_dict = cg.code_generation(cg.get_code_units())

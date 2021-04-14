@@ -22,13 +22,13 @@ def test_core():
     cg.code_written(HEADER_ROOT, header_dict)
     paths += cg.code_written(SRC_ROOT, impl_dict)
 
-    lib = ccimport.ccimport(paths, Path(__file__).parent / "build" / "wtf", 
+    lib = ccimport.ccimport(paths, Path(__file__).parent /"wtf", 
         [HEADER_ROOT])
     
 
 def test_builder():
     cu = Test3()
-    lib = builder.build_pybind([cu], Path(__file__).parent / "build" / "wtf")
+    lib = builder.build_pybind([cu], Path(__file__).parent / "wtf")
 
 
 if __name__ == "__main__":
