@@ -12,7 +12,7 @@ from shutil import rmtree
 from setuptools import Command, find_packages, setup
 
 # Package meta-data.
-NAME = 'PCCM'
+NAME = 'pccm'
 DESCRIPTION = 'Python C++ Code Manager.'
 URL = 'https://github.com/FindDefinition/PCCM'
 EMAIL = 'yanyan.sub@outlook.com'
@@ -22,7 +22,7 @@ VERSION = None
 
 # What packages are required for this module to be executed?
 REQUIRED = [
-    "ccimport"
+    "ccimport", "pybind11>=2.6.0"
 ]
 
 # What packages are optional?
