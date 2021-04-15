@@ -5,7 +5,6 @@ class Block:
     body: List[str|Block]
     suffix: str
 """
-from dataclasses import dataclass
 from typing import List, Union, Optional
 
 class Block:
@@ -23,15 +22,15 @@ def generate_code(block: Union[Block, str], start_col_offset: int,
     col_str = " " * start_col_offset
     if isinstance(block, str):
         block_lines = block.split("\n")
-        
         return [col_str + l for l in block_lines]
     res = []  # type: List[str]
     prefix = block.prefix
     next_indent = indent
     if block.indent is not None:
         next_indent = block.indent 
-    prefix_lines = prefix.split("\n")
-    res.extend([col_str + l for l in prefix_lines])
+    if prefix:
+        prefix_lines = prefix.split("\n")
+        res.extend([col_str + l for l in prefix_lines])
     for child in block.body:
         res.extend(generate_code(child, start_col_offset + next_indent, indent))
     if block.suffix:

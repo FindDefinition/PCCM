@@ -44,9 +44,9 @@ class Pybind11Class(ManualClass):
         self.ns_to_cls_to_func_decls = {
         }  # type: Dict[str, Dict[str, List[PybindMethodDecl]]]
         self.module_name = module_name
-        self.add_include("#include <pybind11/stl.h>")
-        self.add_include("#include <pybind11/pybind11.h>")
-        self.add_include("#include <pybind11/numpy.h>")
+        self.add_include("pybind11/stl.h")
+        self.add_include("pybind11/pybind11.h")
+        self.add_include("pybind11/numpy.h")
         self.file_suffix = file_suffix
         self.built = False
 

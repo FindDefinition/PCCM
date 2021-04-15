@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Dict, Type, Union, Set
+from typing import Optional, List, Tuple, Dict, Type, Union, Set, Callable
 from pathlib import Path
 from pccm.constants import PCCM_FUNC_META_KEY, PCCM_MAGIC_STRING
 import inspect
@@ -41,6 +41,13 @@ class FunctionMeta(object):
 
     def get_post_attrs(self) -> List[str]:
         return []
+
+
+def get_func_meta_except(func) -> FunctionMeta:
+    if not hasattr(func, PCCM_FUNC_META_KEY):
+        raise ValueError(
+            "you need to mark method before use middleware decorator.")
+    return getattr(func, PCCM_FUNC_META_KEY)
 
 
 class ConstructorMeta(FunctionMeta):
@@ -216,17 +223,17 @@ class Member(Argument):
 class FunctionCode(object):
     def __init__(self,
                  code: str,
-                 arguments: List[Argument],
+                 arguments: Union[List[Argument], Tuple[Argument]] = (),
                  return_type: str = "void",
                  ctor_inits: Optional[List[Tuple[str, str]]] = None):
         self.code = code
-        self.arguments = arguments
+        self.arguments = list(arguments) # type: List[Argument]
         self.return_type = return_type
         if ctor_inits is None:
             ctor_inits = []
         self.ctor_inits = ctor_inits
 
-    def get_sig(self, name: str, meta: FunctionMeta):
+    def get_sig(self, name: str, meta: FunctionMeta) -> str:
         """
         pre_attrs ret_type name(args) post_attrs;
         """
@@ -320,6 +327,15 @@ class FunctionCode(object):
         block = Block(prefix_fmt, lines, "}")
         return block
 
+    def arg(self, name: str, type: str, default: Optional[str] = None):
+        name_part = name.split(",")
+        for part in name_part:
+            self.arguments.append(Argument(part.strip(), type, default))
+        return self
+
+    def ret(self, return_type: str):
+        self.return_type = return_type
+        return self
 
 class FunctionDecl(object):
     def __init__(self, meta: FunctionMeta, code: FunctionCode):
@@ -329,6 +345,7 @@ class FunctionDecl(object):
 
 class Class(object):
     """TODO impl-only dependency for CUDA
+    TODO add build meta interface to forward some dependency to builder.
     """
     def __init__(self):
         self._members = []  # type: List[Member]
@@ -346,6 +363,10 @@ class Class(object):
         self._unified_deps = []  # type: List[Class]
         self._function_decls = []  # type: List[FunctionDecl]
         self._namespace = None  # type: Optional[str]
+
+        self._impl_only_cls_dep = {}  # type: Dict[Callable, List[Type[Class]]]
+        self._impl_only_param_cls_dep = {
+        }  # type: Dict[Callable, List[ParameterizedClass]]
 
     @property
     def class_name(self) -> str:
@@ -380,10 +401,40 @@ class Class(object):
                    mw_metas: Optional[List[MiddlewareMeta]] = None):
         self._members.append(Member(name, type, default, mw_metas))
 
+    def add_dependency(self, *no_param_class_cls: Type["Class"]):
+        for npcls in no_param_class_cls:
+            if issubclass(npcls, ParameterizedClass):
+                raise ValueError(
+                    "you can't use class inherit from param class as"
+                    " a dependency. use add_param_class instead.")
+            self._deps.append(npcls)
+
     def add_param_class(self, subnamespace: str,
                         param_class: "ParameterizedClass"):
         assert subnamespace not in self._param_class
         self._param_class[subnamespace] = param_class
+
+    def add_impl_only_dependency(self, func,
+                                 *no_param_class_cls: Type["Class"]):
+        func_meta = get_func_meta_except(func)
+        if func_meta.inline:
+            raise ValueError("inline function can't have impl-only dep")
+        if func not in self._impl_only_cls_dep:
+            self._impl_only_cls_dep[func] = []
+        for npcls in no_param_class_cls:
+            assert npcls not in self._deps
+            self._impl_only_cls_dep[func].append(npcls)
+        return self.add_dependency(*no_param_class_cls)
+
+    def add_impl_only_param_class(self, func, subnamespace: str,
+                                  param_class: "ParameterizedClass"):
+        func_meta = get_func_meta_except(func)
+        if func_meta.inline:
+            raise ValueError("inline function can't have impl-only dep")
+        if func not in self._impl_only_cls_dep:
+            self._impl_only_cls_dep[func] = []
+        self._impl_only_cls_dep[func].append(param_class)
+        return self.add_param_class(subnamespace, param_class)
 
     def add_impl_main(self,
                       impl_name: str,
@@ -393,14 +444,6 @@ class Class(object):
             self._impl_mains[impl_name] = (impl_file_suffix, [])
         assert impl_file_suffix == self._impl_mains[impl_name][0]
         self._impl_mains[impl_name][1].append(main_code)
-
-    def add_dependency(self, *no_param_class_cls: Type["Class"]):
-        for npcls in no_param_class_cls:
-            if issubclass(npcls, ParameterizedClass):
-                raise ValueError(
-                    "you can't use class inherit from param class as"
-                    " a dependency. use add_param_class instead.")
-            self._deps.append(npcls)
 
     def add_global_code(self, content: str):
         self._global_codes.append(content)
@@ -421,10 +464,10 @@ class Class(object):
         """
         self._code_after_class.append(code)
 
-    def add_include(self, inc_stmt: str):
+    def add_include(self, inc_path: str):
         """can be used for empty class for external dependency.
         """
-        self._includes.append(inc_stmt)
+        self._includes.append("#include <{}>".format(inc_path))
 
     @property
     def include_file(self) -> Optional[str]:
@@ -443,7 +486,7 @@ class Class(object):
             self, cu_name: str, ext_decls: List[str],
             member_func_decls: List[str]) -> "CodeSectionClassDef":
         assert self.graph_inited, "you must build dependency graph before generate code"
-        # generate namespace alias for param class
+        # generate namespace alias for class
         dep_alias = []  # type: List[str]
         for dep in self._unified_deps:
             if not isinstance(dep, ParameterizedClass):
@@ -592,8 +635,8 @@ class CodeSectionImpl(CodeSection):
         ns_before = "\n".join(namespace_before)
         ns_after = "\n".join(namespace_after)
         block = Block("", [
-            PCCM_MAGIC_STRING, include_str, ns_before, *self.class_typedefs,
-            *self.func_impls, ns_after, PCCM_MAGIC_STRING
+            include_str, ns_before, *self.class_typedefs, *self.func_impls,
+            ns_after
         ],
                       indent=0)
         return "\n".join(generate_code(block, 0, 2))
@@ -644,6 +687,7 @@ def generate_cu_code_v2(cu: Class, one_impl_one_file: bool = True):
     ctors_decl = []  # List[str]
     dtors_decl = []  # List[str]
     impl_dict_cls = {}  # type: Dict[str, List[str]]
+    impl_only_deps = {}  # type: Dict[str, List[Class]]
     for k, v in inspect.getmembers(cu, inspect.ismethod):
         if hasattr(v, PCCM_FUNC_META_KEY):
             meta = getattr(v, PCCM_FUNC_META_KEY)  # type: FunctionMeta
@@ -691,6 +735,27 @@ def generate_cu_code_v2(cu: Class, one_impl_one_file: bool = True):
                 raise NotImplementedError
             if not meta.inline:
                 impl_dict_cls[impl_file_name].append(func_impl_str)
+
+            # handle impl-only dependency
+            if impl_file_name not in impl_only_deps:
+                impl_only_deps[impl_file_name] = []
+            for impl_func, cls_deps in cu._impl_only_cls_dep.items():
+                if impl_func is v:
+                    for udep in cu._unified_deps:
+                        if isinstance(udep, Class) and not isinstance(
+                                udep, ParameterizedClass):
+                            udep_type = type(udep)
+                            for cls_dep in cls_deps:
+                                if udep_type is cls_dep:
+                                    impl_only_deps[impl_file_name].append(udep)
+            for impl_func, pcls_deps in cu._impl_only_param_cls_dep.items():
+                if impl_func is v:
+                    for udep in cu._unified_deps:
+                        if isinstance(udep, ParameterizedClass):
+                            for pcls_dep in pcls_deps:
+                                if udep is pcls_dep:
+                                    impl_only_deps[impl_file_name].append(udep)
+
     cls_funcs = member_functions_decl + ctors_decl + static_functions_decl + dtors_decl  # type: List[str]
     code_cls_def = cu.get_code_class_def(cu_name, ext_functions_decl,
                                          cls_funcs)
@@ -700,9 +765,19 @@ def generate_cu_code_v2(cu: Class, one_impl_one_file: bool = True):
     assert len(dtors_decl) <= 1, "only allow one dtor"
     for k, v in impl_dict_cls.items():
         if v:
-            code_impl = CodeSectionImpl(
-                cu.namespace, cu_typedefs,
-                ["#include <{}>".format(cu.include_file)], v)
+            impl_includes = ["#include <{}>".format(cu.include_file)]
+            impl_only_cls_alias = []
+            for dep in impl_only_deps[k]:
+                impl_includes.append("#include <{}>".format(dep.include_file))
+                if not isinstance(dep, ParameterizedClass):
+                    name_with_ns = "{}::{}".format(
+                        "::".join(dep.namespace.split(".")), dep.class_name)
+                    ns_stmt = "using {} = {};".format(dep.class_name,
+                                                      name_with_ns)
+                    impl_only_cls_alias.append(ns_stmt)
+            code_impl = CodeSectionImpl(cu.namespace,
+                                        cu_typedefs + impl_only_cls_alias,
+                                        impl_includes, v)
             impl_dict[k] = code_impl
     for k, (suffix, mains) in cu._impl_mains.items():
         impl_key = "{}/{}{}".format(cu.namespace.replace(".", "/"), k, suffix)
@@ -813,7 +888,6 @@ class CodeGenerator(object):
                     new_uid_to_cu[uid] = new_pcls
             else:
                 raise NotImplementedError
-        # uid_to_cu.update(new_uid_to_cu)
 
     def build_graph(self,
                     cus: List[Union[Class, ParameterizedClass]],
