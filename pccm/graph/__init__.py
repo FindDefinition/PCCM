@@ -94,17 +94,20 @@ def postorder_traversal(node: Node, node_map: Dict[str, Node]):
             stack.extend(next_nodes)
 
 
-def _cycle_detection(node_map: Dict[str, Node], node: Node, visited: Set[str], trace: Set[str]):
+def _cycle_detection(node_map: Dict[str, Node], node: Node, visited: Set[str],
+                     trace: Set[str]):
     visited.add(node.key)
     trace.add(node.key)
     for namedio in node.inputs:
         if namedio.key not in visited:
-            if _cycle_detection(node_map, node_map[namedio.key], visited, trace):
-                return True 
+            if _cycle_detection(node_map, node_map[namedio.key], visited,
+                                trace):
+                return True
             elif namedio.key in trace:
-                return True 
+                return True
     trace.remove(node.key)
     return False
+
 
 def cycle_detection(node_map: Dict[str, Node]):
     visited = set()
@@ -114,6 +117,7 @@ def cycle_detection(node_map: Dict[str, Node]):
             if _cycle_detection(node_map, visited, trace):
                 return True
     return False
+
 
 class Graph(object):
     """directed graph of input-based nodes (nodes that only contains input info).
@@ -215,10 +219,12 @@ class Graph(object):
                 return True
         return False
 
+
 def create_node(key: str, *inputs: List[NamedIO]):
     node = Node(key)
     node.inputs = inputs
     return node
+
 
 if __name__ == "__main__":
     node1 = Node("n1")

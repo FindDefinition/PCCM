@@ -1,4 +1,5 @@
-from pccm.core import Class 
+from pccm.core import Class
+
 
 class STLContainers(Class):
     def __init__(self):
@@ -10,16 +11,19 @@ class STLContainers(Class):
         self.add_include("unordered_map")
         self.add_include("unordered_set")
 
+
 class STLMemory(Class):
     def __init__(self):
         super().__init__()
         self.add_include("memory")
+
 
 class STLIO(Class):
     def __init__(self):
         super().__init__()
         self.add_include("iostream")
         self.add_include("fstream")
+
 
 class STLAlgorithm(Class):
     def __init__(self):
@@ -33,7 +37,9 @@ class STLMeta(Class):
         super().__init__()
         self.add_include("type_traits")
 
+
 class STL(Class):
     def __init__(self):
         super().__init__()
-        self.add_dependency(STLContainers, STLMemory, STLIO, STLAlgorithm, STLMeta)
+        self.add_dependency(STLContainers, STLMemory, STLIO, STLAlgorithm,
+                            STLMeta)

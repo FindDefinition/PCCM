@@ -5,16 +5,24 @@ class Block:
     body: List[str|Block]
     suffix: str
 """
-from typing import List, Union, Optional
+from typing import List, Optional, Union
+
 
 class Block:
-    def __init__(self, prefix: str, body: Optional[List[Union["Block", str]]] = None, suffix: str = "", indent: Optional[int] = None):
-        self.prefix = prefix 
+    def __init__(self,
+                 prefix: str,
+                 body: Optional[List[Union["Block", str]]] = None,
+                 suffix: str = "",
+                 indent: Optional[int] = None):
+        self.prefix = prefix
         if body is None:
             body = []
-        self.body = body 
+        self.body = body
         self.suffix = suffix
         self.indent = indent
+
+    def __repr__(self) -> str:
+        return "\n".join(generate_code(self, 0, 2))
 
 
 def generate_code(block: Union[Block, str], start_col_offset: int,
@@ -27,12 +35,13 @@ def generate_code(block: Union[Block, str], start_col_offset: int,
     prefix = block.prefix
     next_indent = indent
     if block.indent is not None:
-        next_indent = block.indent 
+        next_indent = block.indent
     if prefix:
         prefix_lines = prefix.split("\n")
         res.extend([col_str + l for l in prefix_lines])
     for child in block.body:
-        res.extend(generate_code(child, start_col_offset + next_indent, indent))
+        res.extend(generate_code(child, start_col_offset + next_indent,
+                                 indent))
     if block.suffix:
         suffix_lines = block.suffix.split("\n")
         res.extend([col_str + l for l in suffix_lines])

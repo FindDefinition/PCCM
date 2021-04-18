@@ -1,6 +1,8 @@
-import ccimport
-from typing import Dict, List, Optional, Union
 from pathlib import Path
+from typing import Dict, List, Optional, Union
+
+import ccimport
+
 from pccm.core import Class, CodeGenerator
 from pccm.middlewares import pybind
 
@@ -19,6 +21,7 @@ def build_pybind(cus: List[Class],
                  additional_cflags: Optional[Dict[str, List[str]]] = None,
                  msvc_deps_prefix="Note: including file:",
                  build_dir: Optional[Union[str, Path]] = None,
+                 namespace_root = None,
                  verbose=False):
     mod_name = Path(out_path).stem
     if build_dir is None:
@@ -29,7 +32,7 @@ def build_pybind(cus: List[Class],
     build_dir.mkdir(exist_ok=True)
     pb = pybind.Pybind11(mod_name, mod_name, pybind_file_suffix)
     cg = CodeGenerator([pb])
-    cg.build_graph(cus)
+    cg.build_graph(cus, namespace_root)
     header_dict, impl_dict = cg.code_generation(cg.get_code_units())
     HEADER_ROOT = build_dir / "include"
     SRC_ROOT = build_dir / "src"

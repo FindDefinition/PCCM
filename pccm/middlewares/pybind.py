@@ -1,5 +1,10 @@
-from pccm.core import ConstructorMeta, ManualClass, ManualClassGenerator, MemberFunctionMeta, MiddlewareMeta, Class, FunctionDecl, Member, middleware_decorator, Stmt
-from typing import List, Dict
+from typing import Dict, List
+
+from pccm.core import (Class, ConstructorMeta, FunctionDecl, ManualClass,
+                       ManualClassGenerator, Member, MemberFunctionMeta,
+                       MiddlewareMeta)
+from pccm.core.codegen import Block, generate_code
+from pccm.core.markers import middleware_decorator
 
 
 class Pybind11Meta(MiddlewareMeta):
@@ -39,6 +44,7 @@ class PybindMethodDecl(object):
 
 
 class Pybind11Class(ManualClass):
+    # TODO split pybind defs to multiple file for faster compilation.
     def __init__(self, module_name: str, file_suffix: str = ".cc"):
         super().__init__()
         self.ns_to_cls_to_func_decls = {
@@ -60,6 +66,7 @@ class Pybind11Class(ManualClass):
             PybindMethodDecl(func_decl, cu.namespace, cu.class_name))
 
     def handle_member(self, cu: Class, member_decl: Member):
+        # TODO add suport for pybind member.
         pass
 
     def postprocess(self):
@@ -81,7 +88,7 @@ class Pybind11Class(ManualClass):
                         sub_name, parent_name, ns_parts[i - 1])
                     sub_defs.append(stmt)
                     submodules[sub_ns] = "m_{}".format(sub_name)
-        class_defs = []  # type: List[str]
+        class_defs = []  # type: List[Block]
         for ns, cls_to_decl in self.ns_to_cls_to_func_decls.items():
             for cls_name, decls in cls_to_decl.items():
                 has_constructor = False
@@ -101,23 +108,23 @@ class Pybind11Class(ManualClass):
                     cls_method_defs.append(".def(pybind11::init<>())")
                 for decl in decls:
                     cls_method_defs.append(decl.to_string())
+
                 cls_method_defs[-1] += ";"
-                class_defs.append(cls_def)
-                class_defs.extend(cls_method_defs)
-        code = """
-        PYBIND11_MODULE({mod_name}, m){{
-            {submod_defs}
-            {class_defs}
-        }};
-        """.format(mod_name=self.module_name,
-                   submod_defs="\n".join(sub_defs),
-                   class_defs="\n".join(class_defs))
-        self.add_impl_main("{}_pybind_main".format(self.module_name), code, self.file_suffix)
+                cls_def_block = Block(cls_def, cls_method_defs, "")
+                class_defs.append(cls_def_block)
+        code_block = Block("PYBIND11_MODULE({}, m){{".format(self.module_name),
+                           sub_defs + class_defs, "}")
+        code = generate_code(code_block, 0, 2)
+        self.add_impl_main("{}_pybind_main".format(self.module_name),
+                           "\n".join(code), self.file_suffix)
         self.built = True
 
 
 class Pybind11(ManualClassGenerator):
-    def __init__(self, module_name: str, subnamespace: str, file_suffix: str=".cc"):
+    def __init__(self,
+                 module_name: str,
+                 subnamespace: str,
+                 file_suffix: str = ".cc"):
         super().__init__(subnamespace)
         self.module_name = module_name
         self.singleton = Pybind11Class(module_name, file_suffix)
