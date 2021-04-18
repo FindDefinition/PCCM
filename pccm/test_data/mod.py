@@ -1,18 +1,17 @@
-from pccm import core
-from pccm.middlewares import pybind
+import pccm
 from pccm.test_data import PTest1, Test2
 
 
-class Test3(core.Class):
+class Test3(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_dependency(Test2)
         self.add_param_class("ns1", PTest1(3, "int"), "PP")
 
-    @pybind.pybind_mark
-    @core.member_function(inline=True)
+    @pccm.pybind.pybind_mark
+    @pccm.member_function(inline=True)
     def add(self):
-        code = core.FunctionCode("")
+        code = pccm.FunctionCode("")
         with code.if_("a > 5"):
             code.raw("a += 3;")
 
@@ -28,10 +27,10 @@ class Test4(Test3):
     def __init__(self):
         super().__init__()
 
-    @pybind.pybind_mark
-    @core.member_function(inline=True)
+    @pccm.pybind.pybind_mark
+    @pccm.member_function(inline=True)
     def add2(self):
-        code = core.FunctionCode("")
+        code = pccm.FunctionCode("")
         code.raw("""
         return add(a, b);
         """).arg("a,b", "int").ret("int")

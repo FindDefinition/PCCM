@@ -453,6 +453,12 @@ class Class(object):
         self._impl_only_param_cls_dep = {
         }  # type: Dict[Callable, List[ParameterizedClass]]
 
+        self._build_meta = BuildMeta()
+
+    @property
+    def build_meta(self) -> BuildMeta:
+        return self._build_meta
+
     @property
     def class_name(self) -> str:
         return type(self).__name__
