@@ -3,23 +3,12 @@ import contextlib
 import inspect
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
-
+from collections import OrderedDict
 from ccimport import loader, compat
 
 from pccm.core.codegen import Block, generate_code, generate_code_list
 from pccm.constants import PCCM_FUNC_META_KEY, PCCM_MAGIC_STRING
-from pccm.core.buildmeta import BuildMeta
-
-def _unique_list_keep_order(seq: list):
-    if compat.Python3_7AndLater:
-        # https://www.peterbe.com/plog/fastest-way-to-uniquify-a-list-in-python-3.6
-        # only python 3.7 language std ensure the preserve-order dict
-        return list(dict.fromkeys(seq))
-    else:
-        # https://stackoverflow.com/questions/480214/how-do-you-remove-duplicates-from-a-list-whilst-preserving-order
-        seen = set()
-        seen_add = seen.add
-        return [x for x in seq if not (x in seen or seen_add(x))]
+from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
 
 
 class MiddlewareMeta(object):
@@ -431,8 +420,12 @@ class Class(object):
     """
     def __init__(self):
         self._members = []  # type: List[Member]
-        self._param_class = {}  # type: Dict[str, ParameterizedClass]
-        self._param_class_alias = {}  # type: Dict[str, str]
+        if compat.Python3_7AndLater:
+            self._param_class = {}  # type: Dict[str, ParameterizedClass]
+            self._param_class_alias = {}  # type: Dict[str, str]
+        else:
+            self._param_class = OrderedDict()  # type: OrderedDict[str, ParameterizedClass]
+            self._param_class_alias = OrderedDict()  # type: OrderedDict[str, str]
 
         self._typedefs = []  # type: List[Typedef]
         self._static_consts = []  # type: List[StaticConst]
@@ -441,17 +434,20 @@ class Class(object):
         self._includes = []  # type: List[str]
         # TODO we can't use set here because we need to keep order of deps
         self._deps = []  # type: List[Type[Class]]
-        self._impl_mains = {}  # type: Dict[str, Tuple[str, List[str]]]
+        self._impl_mains = OrderedDict()  # type: Dict[str, Tuple[str, List[str]]]
         self._global_codes = []  # type: List[str]
         # filled during graph building
         self._graph_inited = False  # type: bool
         self._unified_deps = []  # type: List[Class]
         self._function_decls = []  # type: List[FunctionDecl]
         self._namespace = None  # type: Optional[str]
-
-        self._impl_only_cls_dep = {}  # type: Dict[Callable, List[Type[Class]]]
-        self._impl_only_param_cls_dep = {
-        }  # type: Dict[Callable, List[ParameterizedClass]]
+        if compat.Python3_7AndLater:
+            self._impl_only_cls_dep = {}  # type: Dict[Callable, List[Type[Class]]]
+            self._impl_only_param_cls_dep = {
+            }  # type: Dict[Callable, List[ParameterizedClass]]
+        else:
+            self._impl_only_cls_dep = OrderedDict()  # type: OrderedDict[Callable, List[Type[Class]]]
+            self._impl_only_param_cls_dep = OrderedDict()  # type: OrderedDict[Callable, List[ParameterizedClass]]
 
         self._build_meta = BuildMeta()
 
@@ -594,7 +590,7 @@ class Class(object):
                    for d in self.get_common_deps())
         return res
 
-    def get_parent_class(self) -> Optional[Type["Class"]]:
+    def get_parent_class(self): # -> Optional[Type["Class"]]
         """TODO find a better way to check invalid param class inherit
         """
         mro = inspect.getmro(type(self))
@@ -807,7 +803,7 @@ class CodeSectionClassDef(CodeSection):
         self.parent_class = parent_class
 
     def to_block(self) -> Block:
-        code_before_cls = self.dep_alias + self.code_before + self.external_funcs
+        code_before_cls = self.dep_alias + self.code_before + generate_code_list(self.external_funcs, 0, 2)
         class_contents = self.typedefs + self.members + self.static_consts + self.functions
         if self.parent_class is not None:
             prefix = code_before_cls + [
@@ -886,7 +882,7 @@ def generate_cu_code_v2(cu: Class, one_impl_one_file: bool = True):
         "xx.yy.zz": content
     }
     """
-    impl_dict = {}  # type: Dict[str, CodeSectionImpl]
+    impl_dict = OrderedDict()  # type: Dict[str, CodeSectionImpl]
     code_cdefs = []  # type: List[CodeSectionClassDef]
     cu_name = cu.class_name
     assert cu.namespace is not None, cu.class_name
@@ -898,8 +894,8 @@ def generate_cu_code_v2(cu: Class, one_impl_one_file: bool = True):
     ctors_index_decl = []  # type: List[Tuple[int, str]]
     dtors_index_decl = []  # type: List[Tuple[int, str]]
 
-    impl_dict_cls = {}  # type: Dict[str, List[str]]
-    impl_only_deps = {}  # type: Dict[str, List[Class]]
+    impl_dict_cls = OrderedDict()  # type: Dict[str, List[str]]
+    impl_only_deps = OrderedDict()  # type: Dict[str, List[Class]]
     for index, (k, v) in enumerate(cu.get_members()):
         if hasattr(v, PCCM_FUNC_META_KEY):
             meta = getattr(v, PCCM_FUNC_META_KEY)  # type: FunctionMeta
@@ -1077,7 +1073,7 @@ class CodeGenerator(object):
 
     def _apply_middleware_to_cus(self, uid_to_cu: Dict[str, Class]):
         # manual middlewares
-        new_uid_to_cu = {}  # type: Dict[str, Class]
+        new_uid_to_cu = OrderedDict()  # type: Dict[str, Class]
         for middleware in self.middlewares:
             mw_type = type(middleware)
             if isinstance(middleware, ManualClassGenerator):
@@ -1130,7 +1126,7 @@ class CodeGenerator(object):
                 cu_type_to_cu[cu_type] = cu
                 if cu.namespace is None:
                     cu.namespace = extract_module_id_of_class(cu_type, root)
-        uid_to_cu = {}  # type: Dict[str, Class]
+        uid_to_cu = OrderedDict()  # type: Dict[str, Class]
         for cu in cus:
             stack = [(cu, set())]  # type: List[Tuple[Class, Set[Type[Class]]]]
             while stack:
@@ -1183,8 +1179,8 @@ class CodeGenerator(object):
         return self.code_units
 
     def code_generation(self, cus: List[Union[Class, ParameterizedClass]]):
-        header_dict = {}  # type: Dict[str, CodeSectionHeader]
-        impl_dict = {}  # type: Dict[str, CodeSectionImpl]
+        header_dict = OrderedDict()  # type: Dict[str, CodeSectionHeader]
+        impl_dict = OrderedDict()  # type: Dict[str, CodeSectionImpl]
         for cu in cus:
             cu_header_dict, cu_impls_dict = generate_cu_code_v2(cu)
             header_dict.update(cu_header_dict)
