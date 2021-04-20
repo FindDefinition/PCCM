@@ -1,14 +1,16 @@
 import abc
 import contextlib
+import difflib
 import inspect
+from collections import OrderedDict
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
-from collections import OrderedDict
-from ccimport import loader, compat
 
-from pccm.core.codegen import Block, generate_code, generate_code_list
+from ccimport import compat, loader
+
 from pccm.constants import PCCM_FUNC_META_KEY, PCCM_MAGIC_STRING
 from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
+from pccm.core.codegen import Block, generate_code, generate_code_list
 
 
 class MiddlewareMeta(object):
@@ -19,13 +21,11 @@ class MiddlewareMeta(object):
 class FunctionMeta(object):
     def __init__(self,
                  inline: bool = False,
+                 constexpr: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
-        # why no constexpr? because we should perform
-        # all constexpr operation in python.
-        # NEVER USE C++ CONSTEXPR/TEMPLATE METAPROGRAMMING
         self.name = name
         if attrs is None:
             attrs = []
@@ -34,6 +34,7 @@ class FunctionMeta(object):
         # it will determine function code location.
         # in header, or in source file.
         self.inline = inline
+        self.constexpr = constexpr
         # impl file location. if empty, use default location strategy
         self.impl_loc = impl_loc
         self.impl_file_suffix = impl_file_suffix
@@ -43,6 +44,8 @@ class FunctionMeta(object):
         res = self.attrs.copy()  # type: List[str]
         if self.inline:
             res.append("inline")
+        if self.constexpr:
+            res.append("constexpr")
         return res
 
     def get_post_attrs(self) -> List[str]:
@@ -59,12 +62,14 @@ def get_func_meta_except(func) -> FunctionMeta:
 class ConstructorMeta(FunctionMeta):
     def __init__(self,
                  inline: bool = False,
+                 constexpr: bool = False,
                  explicit: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
+                         constexpr=constexpr,
                          attrs=attrs,
                          name=name,
                          impl_loc=impl_loc,
@@ -81,6 +86,7 @@ class ConstructorMeta(FunctionMeta):
 class DestructorMeta(FunctionMeta):
     def __init__(self,
                  inline: bool = False,
+                 constexpr: bool = False,
                  virtual: bool = True,
                  override: bool = False,
                  final: bool = False,
@@ -89,6 +95,7 @@ class DestructorMeta(FunctionMeta):
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
+                         constexpr=constexpr,
                          attrs=attrs,
                          name=name,
                          impl_loc=impl_loc,
@@ -117,6 +124,7 @@ class DestructorMeta(FunctionMeta):
 class MemberFunctionMeta(FunctionMeta):
     def __init__(self,
                  inline: bool = False,
+                 constexpr: bool = False,
                  virtual: bool = True,
                  override: bool = False,
                  final: bool = False,
@@ -126,6 +134,7 @@ class MemberFunctionMeta(FunctionMeta):
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
+                         constexpr=constexpr,
                          attrs=attrs,
                          name=name,
                          impl_loc=impl_loc,
@@ -157,11 +166,13 @@ class MemberFunctionMeta(FunctionMeta):
 class StaticMemberFunctionMeta(FunctionMeta):
     def __init__(self,
                  inline: bool = False,
+                 constexpr: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
+                         constexpr=constexpr,
                          attrs=attrs,
                          name=name,
                          impl_loc=impl_loc,
@@ -178,11 +189,13 @@ class ExternalFunctionMeta(FunctionMeta):
     """
     def __init__(self,
                  inline: bool = False,
+                 constexpr: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
+                         constexpr=constexpr,
                          attrs=attrs,
                          name=name,
                          impl_loc=impl_loc,
@@ -424,8 +437,10 @@ class Class(object):
             self._param_class = {}  # type: Dict[str, ParameterizedClass]
             self._param_class_alias = {}  # type: Dict[str, str]
         else:
-            self._param_class = OrderedDict()  # type: OrderedDict[str, ParameterizedClass]
-            self._param_class_alias = OrderedDict()  # type: OrderedDict[str, str]
+            self._param_class = OrderedDict(
+            )  # type: OrderedDict[str, ParameterizedClass]
+            self._param_class_alias = OrderedDict(
+            )  # type: OrderedDict[str, str]
 
         self._typedefs = []  # type: List[Typedef]
         self._static_consts = []  # type: List[StaticConst]
@@ -434,7 +449,8 @@ class Class(object):
         self._includes = []  # type: List[str]
         # TODO we can't use set here because we need to keep order of deps
         self._deps = []  # type: List[Type[Class]]
-        self._impl_mains = OrderedDict()  # type: Dict[str, Tuple[str, List[str]]]
+        self._impl_mains = OrderedDict(
+        )  # type: Dict[str, Tuple[str, List[str]]]
         self._global_codes = []  # type: List[str]
         # filled during graph building
         self._graph_inited = False  # type: bool
@@ -442,12 +458,15 @@ class Class(object):
         self._function_decls = []  # type: List[FunctionDecl]
         self._namespace = None  # type: Optional[str]
         if compat.Python3_7AndLater:
-            self._impl_only_cls_dep = {}  # type: Dict[Callable, List[Type[Class]]]
+            self._impl_only_cls_dep = {
+            }  # type: Dict[Callable, List[Type[Class]]]
             self._impl_only_param_cls_dep = {
             }  # type: Dict[Callable, List[ParameterizedClass]]
         else:
-            self._impl_only_cls_dep = OrderedDict()  # type: OrderedDict[Callable, List[Type[Class]]]
-            self._impl_only_param_cls_dep = OrderedDict()  # type: OrderedDict[Callable, List[ParameterizedClass]]
+            self._impl_only_cls_dep = OrderedDict(
+            )  # type: OrderedDict[Callable, List[Type[Class]]]
+            self._impl_only_param_cls_dep = OrderedDict(
+            )  # type: OrderedDict[Callable, List[ParameterizedClass]]
 
         self._build_meta = BuildMeta()
 
@@ -508,7 +527,8 @@ class Class(object):
                         name_alias: Optional[str] = None):
         # TODO check alias is unique
         if not isinstance(param_class, ParameterizedClass):
-            msg = "can only add Param Class, but your {} is Class".format(param_class.class_name)
+            msg = "can only add Param Class, but your {} is Class".format(
+                param_class.class_name)
             raise ValueError(msg)
         assert subnamespace not in self._param_class
         self._param_class[subnamespace] = param_class
@@ -530,9 +550,11 @@ class Class(object):
                 # only add once
                 self.add_dependency(npcls)
 
-    def add_impl_only_param_class(self, func, subnamespace: str,
+    def add_impl_only_param_class(self,
+                                  func,
+                                  subnamespace: str,
                                   param_class: "ParameterizedClass",
-                                    name_alias: Optional[str] = None):
+                                  name_alias: Optional[str] = None):
         if inspect.ismethod(func):
             func = func.__func__
 
@@ -590,7 +612,7 @@ class Class(object):
                    for d in self.get_common_deps())
         return res
 
-    def get_parent_class(self): # -> Optional[Type["Class"]]
+    def get_parent_class(self):  # -> Optional[Type["Class"]]
         """TODO find a better way to check invalid param class inherit
         """
         mro = inspect.getmro(type(self))
@@ -711,8 +733,9 @@ class Class(object):
         for parent in parents:
             members = inspect.getmembers(parent, predicate=inspect.isfunction)
             parents_methods.update(members)
-        
-        child_methods = set(inspect.getmembers(this_cls, predicate=inspect.isfunction))
+
+        child_methods = set(
+            inspect.getmembers(this_cls, predicate=inspect.isfunction))
         child_only_methods = child_methods - parents_methods
         res = list(child_only_methods)
         res.sort(key=lambda x: inspect.getsourcelines(x[1])[1])
@@ -803,7 +826,8 @@ class CodeSectionClassDef(CodeSection):
         self.parent_class = parent_class
 
     def to_block(self) -> Block:
-        code_before_cls = self.dep_alias + self.code_before + generate_code_list(self.external_funcs, 0, 2)
+        code_before_cls = self.dep_alias + self.code_before + generate_code_list(
+            self.external_funcs, 0, 2)
         class_contents = self.typedefs + self.members + self.static_consts + self.functions
         if self.parent_class is not None:
             prefix = code_before_cls + [
@@ -969,7 +993,8 @@ def generate_cu_code_v2(cu: Class, one_impl_one_file: bool = True):
                                 if udep is pcls_dep:
                                     impl_only_deps[impl_file_name].append(udep)
 
-    cls_funcs_with_index = (member_functions_index_decl + ctors_index_decl + static_functions_index_decl + dtors_index_decl) 
+    cls_funcs_with_index = (member_functions_index_decl + ctors_index_decl +
+                            static_functions_index_decl + dtors_index_decl)
     cls_funcs_with_index.sort(key=lambda x: x[0])
     cls_funcs = [c[1] for c in cls_funcs_with_index]
     code_cls_def = cu.get_code_class_def(cu_name, ext_functions_decl,
@@ -1062,14 +1087,22 @@ _MW_TYPES = Union[ManualClassGenerator, AutoClassGenerator,
                   ManualClassTransformer, AutoClassTransformer]
 
 
+class CodeFormatter(object):
+    def __call__(self, code: str):
+        return code
+
+
 class CodeGenerator(object):
-    def __init__(self, middlewares: Optional[List[_MW_TYPES]] = None):
+    def __init__(self,
+                 middlewares: Optional[List[_MW_TYPES]] = None,
+                 verbose: bool = False):
         if middlewares is None:
             middlewares = []
         self.middlewares = middlewares
 
         self.code_units = []  # type: List[Class]
         self.built = False
+        self.verbose = verbose
 
     def _apply_middleware_to_cus(self, uid_to_cu: Dict[str, Class]):
         # manual middlewares
@@ -1187,12 +1220,16 @@ class CodeGenerator(object):
             impl_dict.update(cu_impls_dict)
         return header_dict, impl_dict
 
-    def code_written(self, root: Union[str, Path],
-                     code_dict: Dict[str, CodeSection]):
+    def code_written(self,
+                     root: Union[str, Path],
+                     code_dict: Dict[str, CodeSection],
+                     code_fmt: Optional[CodeFormatter] = None):
         root_path = Path(root)
         all_paths = []  # type: List[Path]
+        if code_fmt is None:
+            code_fmt = CodeFormatter()
         for k, v in code_dict.items():
-            code_to_write = v.to_string()
+            code_to_write = code_fmt(v.to_string())
             code_path = root_path / k
             if code_path.exists():
                 # read first, if same, don't write to keep file state.
@@ -1201,9 +1238,14 @@ class CodeGenerator(object):
                 if code.strip() == code_to_write.strip():
                     all_paths.append(code_path)
                     continue
+            if self.verbose and code_path.exists():
+                code_to_write_lines = code_to_write.strip().split("\n")
+                code_old_lines = code.strip().split("\n")
+                diff = difflib.unified_diff(code_old_lines,
+                                            code_to_write_lines)
+                print("\n".join(diff))
             code_path.parent.mkdir(exist_ok=True, parents=True)
             with code_path.open("w") as f:
                 f.write(code_to_write)
             all_paths.append(code_path)
         return all_paths
-

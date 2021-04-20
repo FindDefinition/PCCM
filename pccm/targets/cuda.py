@@ -1,7 +1,8 @@
 from typing import List, Optional
 
-from pccm.core import markers
-from pccm.core import MemberFunctionMeta, ExternalFunctionMeta, StaticMemberFunctionMeta, ConstructorMeta, DestructorMeta
+from pccm.core import (ConstructorMeta, DestructorMeta, ExternalFunctionMeta,
+                       MemberFunctionMeta, StaticMemberFunctionMeta, markers)
+
 
 class CudaMemberFunctionMeta(MemberFunctionMeta):
     def get_pre_attrs(self) -> List[str]:
@@ -10,12 +11,14 @@ class CudaMemberFunctionMeta(MemberFunctionMeta):
             res.remove("inline")
         return res
 
+
 class CudaStaticMemberFunctionMeta(StaticMemberFunctionMeta):
     def get_pre_attrs(self) -> List[str]:
         res = super().get_pre_attrs()  # type: List[str]
         if "__forceinline__" in res and "inline" in res:
             res.remove("inline")
         return res
+
 
 class CudaConstructorMeta(ConstructorMeta):
     def get_pre_attrs(self) -> List[str]:
@@ -24,12 +27,14 @@ class CudaConstructorMeta(ConstructorMeta):
             res.remove("inline")
         return res
 
+
 class CudaDestructorMeta(DestructorMeta):
     def get_pre_attrs(self) -> List[str]:
         res = super().get_pre_attrs()  # type: List[str]
         if "__forceinline__" in res and "inline" in res:
             res.remove("inline")
         return res
+
 
 class CudaExternalFunctionMeta(ExternalFunctionMeta):
     def get_pre_attrs(self) -> List[str]:
@@ -51,6 +56,7 @@ def cuda_global_function(func=None,
     return markers.external_function(func,
                                      name=name,
                                      inline=inline,
+                                     constexpr=False,
                                      impl_loc=impl_loc,
                                      impl_file_suffix=impl_file_suffix,
                                      attrs=cuda_global_attrs)
@@ -61,6 +67,7 @@ def member_function(func=None,
                     device: bool = False,
                     inline: bool = False,
                     forceinline: bool = False,
+                    constexpr: bool = False,
                     const: bool = False,
                     attrs: Optional[List[str]] = None,
                     impl_loc: str = "",
@@ -79,14 +86,15 @@ def member_function(func=None,
         attrs = []
     attrs.extend(cuda_global_attrs)
     meta = CudaMemberFunctionMeta(name=name,
-                                inline=inline,
-                                virtual=False,
-                                override=False,
-                                final=False,
-                                const=const,
-                                impl_loc=impl_loc,
-                                impl_file_suffix=impl_file_suffix,
-                                attrs=attrs)
+                                  inline=inline,
+                                  constexpr=constexpr,
+                                  virtual=False,
+                                  override=False,
+                                  final=False,
+                                  const=const,
+                                  impl_loc=impl_loc,
+                                  impl_file_suffix=impl_file_suffix,
+                                  attrs=attrs)
     return markers.meta_decorator(func, meta)
 
 
@@ -95,6 +103,7 @@ def static_function(func=None,
                     device: bool = False,
                     inline: bool = False,
                     forceinline: bool = False,
+                    constexpr: bool = False,
                     attrs: Optional[List[str]] = None,
                     impl_loc: str = "",
                     impl_file_suffix: str = ".cu",
@@ -114,6 +123,7 @@ def static_function(func=None,
     meta = CudaStaticMemberFunctionMeta(
         name=name,
         inline=inline,
+        constexpr=constexpr,
         attrs=attrs,
         impl_loc=impl_loc,
         impl_file_suffix=impl_file_suffix,
@@ -126,6 +136,7 @@ def external_function(func=None,
                       device: bool = False,
                       inline: bool = False,
                       forceinline: bool = False,
+                      constexpr: bool = False,
                       attrs: Optional[List[str]] = None,
                       impl_loc: str = "",
                       impl_file_suffix: str = ".cu",
@@ -145,6 +156,7 @@ def external_function(func=None,
     meta = CudaExternalFunctionMeta(
         name=name,
         inline=inline,
+        constexpr=constexpr,
         attrs=attrs,
         impl_loc=impl_loc,
         impl_file_suffix=impl_file_suffix,
@@ -157,6 +169,7 @@ def constructor(func=None,
                 device: bool = False,
                 inline: bool = False,
                 forceinline: bool = False,
+                constexpr: bool = False,
                 attrs: Optional[List[str]] = None,
                 impl_loc: str = "",
                 impl_file_suffix: str = ".cu",
@@ -175,6 +188,7 @@ def constructor(func=None,
     attrs.extend(cuda_global_attrs)
     meta = CudaConstructorMeta(
         inline=inline,
+        constexpr=constexpr,
         attrs=attrs,
         impl_loc=impl_loc,
         impl_file_suffix=impl_file_suffix,

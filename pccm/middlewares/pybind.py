@@ -72,7 +72,7 @@ class Pybind11Class(ManualClass):
     def postprocess(self):
         if self.built:
             return
-        submodules = {}
+        submodules = {}  # type: Dict[str, str]
         sub_defs = []  # type: List[str]
         for ns in self.ns_to_cls_to_func_decls.keys():
             ns_parts = ns.split(".")

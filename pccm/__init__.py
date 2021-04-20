@@ -5,6 +5,6 @@ from pccm.core.markers import (constructor, destructor, external_function,
 from pccm.middlewares import pybind
 from pccm.targets import cuda
 
+
 def boolean(val: bool):
     return "true" if val else "false"
-
