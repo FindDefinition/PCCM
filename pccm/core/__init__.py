@@ -268,6 +268,7 @@ class FunctionCode(object):
                  arguments: Union[List[Argument], Tuple[Argument]] = (),
                  return_type: str = "void",
                  ctor_inits: Optional[List[Tuple[str, str]]] = None):
+        # TODO add support for template member/static/external function
         self.arguments = list(arguments)  # type: List[Argument]
         self.return_type = return_type
         if ctor_inits is None:
@@ -308,6 +309,13 @@ class FunctionCode(object):
             yield
 
     @contextlib.contextmanager
+    def range_(self, var: str, stop: str, prefix: str = ""):
+        with self.for_(
+                "int {i} = 0; {i} < {stop}; ++{i}".format(i=var, stop=stop),
+                prefix):
+            yield
+
+    @contextlib.contextmanager
     def while_(self, for_stmt: str, prefix: str = ""):
         if prefix:
             self.raw("{}\n".format(prefix))
@@ -329,7 +337,7 @@ class FunctionCode(object):
         with self.block("else ({})".format(if_test)):
             yield
 
-    def unpack(self, *args) -> str:
+    def unpack(self, args: list) -> str:
         return ", ".join(map(str, args))
 
     def get_sig(self, name: str, meta: FunctionMeta) -> str:
@@ -406,6 +414,8 @@ class FunctionCode(object):
     def arg(self, name: str, type: str, default: Optional[str] = None):
         name_part = name.split(",")
         for part in name_part:
+            if not part.strip():
+                raise ValueError("you provide a empty name in", name)
             self.arguments.append(Argument(part.strip(), type, default))
         return self
 
@@ -430,6 +440,10 @@ class Class(object):
     TODO add build meta interface to forward some dependency to builder.
     TODO ignore empty class in code generation
     TODO add better virtual function check support by using python mro.
+    TODO find a way to implement param class inherit.
+    TODO add alias for non-param Class
+    TODO add param class resume if class provide hash method
+    TODO support dynamic method
     """
     def __init__(self):
         self._members = []  # type: List[Member]
@@ -508,6 +522,8 @@ class Class(object):
                    mw_metas: Optional[List[MiddlewareMeta]] = None):
         name_part = name.split(",")
         for part in name_part:
+            if not part.strip():
+                raise ValueError("you provide a empty name in", name)
             self._members.append(
                 Member(part.strip(), type, default, array, mw_metas))
 

@@ -2,7 +2,7 @@ from typing import Dict, List
 
 from pccm.core import (Class, ConstructorMeta, FunctionDecl, ManualClass,
                        ManualClassGenerator, Member, MemberFunctionMeta,
-                       MiddlewareMeta)
+                       MiddlewareMeta, StaticMemberFunctionMeta)
 from pccm.core.codegen import Block, generate_code
 from pccm.core.markers import middleware_decorator
 
@@ -14,13 +14,14 @@ class Pybind11Meta(MiddlewareMeta):
 
 
 class PybindMethodDecl(object):
+    # TODO support external function
     def __init__(self, decl: FunctionDecl, namespace: str, class_name: str):
         self.decl = decl
         self.func_name = decl.meta.name
         if isinstance(decl.meta, ConstructorMeta):
             arg_types = [a.type_str for a in decl.code.arguments]
             self.addr = "pybind11::init<{}>()".format(", ".join(arg_types))
-        elif isinstance(decl.meta, MemberFunctionMeta):
+        elif isinstance(decl.meta, (MemberFunctionMeta, StaticMemberFunctionMeta)):
             self.addr = "&{}::{}::{}".format(namespace.replace(".", "::"),
                                              class_name, self.func_name)
         else:
@@ -36,11 +37,14 @@ class PybindMethodDecl(object):
     def to_string(self) -> str:
         if isinstance(self.decl.meta, ConstructorMeta):
             return ".def({}, {})".format(self.addr, ", ".join(self.args))
+        def_stmt = "def"
+        if isinstance(self.decl.meta, StaticMemberFunctionMeta):
+            def_stmt = "def_readonly_static"
         if self.args:
-            return ".def(\"{}\", {}, {})".format(self.func_name, self.addr,
+            return ".{}(\"{}\", {}, {})".format(def_stmt, self.func_name, self.addr,
                                                  ", ".join(self.args))
         else:
-            return ".def(\"{}\", {})".format(self.func_name, self.addr)
+            return ".{}(\"{}\", {})".format(def_stmt, self.func_name, self.addr)
 
 
 class Pybind11Class(ManualClass):

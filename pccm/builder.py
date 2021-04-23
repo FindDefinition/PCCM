@@ -25,6 +25,7 @@ def build_pybind(cus: List[Class],
                  build_dir: Optional[Union[str, Path]] = None,
                  namespace_root: Optional[Union[str, Path]] = None,
                  code_fmt: Optional[CodeFormatter] = None,
+                 out_root: Optional[Union[str, Path]] = None,
                  verbose=False):
     mod_name = Path(out_path).stem
     if build_dir is None:
@@ -39,9 +40,10 @@ def build_pybind(cus: List[Class],
         additional_cflags = {}
     if additional_lflags is None:
         additional_lflags = {}
-
+    if out_root is None:
+        out_root = build_dir
     build_dir = Path(build_dir)
-    build_dir.mkdir(exist_ok=True)
+    build_dir.mkdir(exist_ok=True, parents=True)
     pb = pybind.Pybind11(mod_name, mod_name, pybind_file_suffix)
     cg = CodeGenerator([pb], verbose=verbose)
     cg.build_graph(cus, namespace_root)
@@ -73,4 +75,6 @@ def build_pybind(cus: List[Class],
         additional_cflags=extern_build_meta.compiler_to_cflags,
         additional_lflags=extern_build_meta.compiler_to_ldflags,
         msvc_deps_prefix=msvc_deps_prefix,
+        build_dir=build_dir,
+        out_root=out_root,
         verbose=verbose)
