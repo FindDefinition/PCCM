@@ -6,6 +6,7 @@ import ccimport
 from pccm.core import Class, CodeFormatter, CodeGenerator
 from pccm.core.buildmeta import BuildMeta
 from pccm.middlewares import pybind
+from ccimport.buildtools.writer import DEFAULT_MSVC_DEP_PREFIX
 
 
 def build_pybind(cus: List[Class],
@@ -21,7 +22,7 @@ def build_pybind(cus: List[Class],
                  pybind_file_suffix: str = ".cc",
                  additional_cflags: Optional[Dict[str, List[str]]] = None,
                  additional_lflags: Optional[Dict[str, List[str]]] = None,
-                 msvc_deps_prefix="Note: including file:",
+                 msvc_deps_prefix=DEFAULT_MSVC_DEP_PREFIX,
                  build_dir: Optional[Union[str, Path]] = None,
                  namespace_root: Optional[Union[str, Path]] = None,
                  code_fmt: Optional[CodeFormatter] = None,
