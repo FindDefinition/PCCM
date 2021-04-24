@@ -34,6 +34,15 @@ class PTest1(pccm.ParameterizedClass):
                                  argus,
                                  return_type=self.type)
 
+    @pccm.member_function
+    def add_func_template(self):
+        code =  pccm.FunctionCode("""
+        return a + b + {};
+        """.format(self.const))
+        code.targ("T")
+        code.arg("a,b", "T")
+        code.ret(self.type)
+        return code
 
 class Test2(pccm.Class):
     def __init__(self):

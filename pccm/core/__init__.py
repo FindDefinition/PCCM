@@ -31,7 +31,7 @@ class FunctionMeta(object):
             attrs = []
         self.attrs = attrs  # type: List[str]
         # the inline attr is important because
-        # it will determine function code location.
+        # it will determine function impl code location.
         # in header, or in source file.
         self.inline = inline
         self.constexpr = constexpr
@@ -50,6 +50,9 @@ class FunctionMeta(object):
 
     def get_post_attrs(self) -> List[str]:
         return []
+
+    def is_header_only(self):
+        return self.inline
 
 
 def get_func_meta_except(func) -> FunctionMeta:
@@ -261,6 +264,44 @@ class Member(Argument):
                 return "{} {}[{}] = {};".format(self.type_str, self.name,
                                                 self.array, self.default)
 
+class TemplateTypeArgument(object):
+    def __init__(self, name: str, default: Optional[str] = None, template: str = "", packed: bool = False):
+        self.name = name 
+        self.template = template
+        self.packed = packed 
+        self.default = default
+
+    def to_string(self) -> str:
+        pack = ""
+        if self.packed:
+            if self.default:
+                raise ValueError("packed arg can't have default value")
+            pack = "..."
+        if self.template:
+            res = "{} typename{} {}".format(self.template, pack, self.name)
+        else:
+            res = "typename{} {}".format(pack, self.name)
+        if self.default:
+            res += " = {}".format(self.default)
+        return res
+
+class TemplateNonTypeArgument(object):
+    def __init__(self, name: str, type: str, default: Optional[str] = None, packed: bool = False):
+        self.name = name 
+        self.type = type
+        self.packed = packed 
+        self.default = default
+
+    def to_string(self) -> str:
+        pack = ""
+        if self.packed:
+            if self.default:
+                raise ValueError("packed arg can't have default value")
+            pack = "..."
+        res = "{}{} {}".format(self.type, pack, self.name)
+        if self.default:
+            res += " = {}".format(self.default)
+        return res
 
 class FunctionCode(object):
     def __init__(self,
@@ -268,15 +309,17 @@ class FunctionCode(object):
                  arguments: Union[List[Argument], Tuple[Argument]] = (),
                  return_type: str = "void",
                  ctor_inits: Optional[List[Tuple[str, str]]] = None):
-        # TODO add support for template member/static/external function
         self.arguments = list(arguments)  # type: List[Argument]
         self.return_type = return_type
         if ctor_inits is None:
             ctor_inits = []
         self.ctor_inits = ctor_inits
-
+        self._template_arguments = [] # type: List[Union[TemplateTypeArgument, TemplateNonTypeArgument]]
         self._blocks = [Block("", [], indent=0)]  # type: List[Block]
         self.raw(code)
+
+    def is_template(self) -> bool:
+        return len(self._template_arguments) > 0
 
     def raw(self, code: str):
         # align code indent to zero if possible
@@ -300,6 +343,14 @@ class FunctionCode(object):
         yield
         last_block = self._blocks.pop()
         self._blocks[-1].body.append(last_block)
+
+    @contextlib.contextmanager
+    def macro_block(self, prefix: str):
+        self._blocks.append(Block(prefix, []))
+        yield
+        last_block = self._blocks.pop()
+        self._blocks[-1].body.append(last_block)
+
 
     @contextlib.contextmanager
     def for_(self, for_stmt: str, prefix: str = ""):
@@ -333,28 +384,50 @@ class FunctionCode(object):
             yield
 
     @contextlib.contextmanager
-    def else_(self, if_test: str):
-        with self.block("else ({})".format(if_test)):
+    def else_(self):
+        with self.block("else".format(if_test)):
             yield
+
+    @contextlib.contextmanager
+    def macro_if_(self, if_test: str, attr: str = ""):
+        with self.macro_block("#if {}({})".format(attr, if_test)):
+            yield
+
+    @contextlib.contextmanager
+    def macro_else_if_(self, if_test: str):
+        with self.macro_block("#elif ({})".format(if_test)):
+            yield
+
+    @contextlib.contextmanager
+    def macro_else_(self):
+        with self.macro_block("#else"):
+            yield
+
+    def macro_endif_(self):
+        self.raw("#endif")
 
     def unpack(self, args: list) -> str:
         return ", ".join(map(str, args))
 
     def get_sig(self, name: str, meta: FunctionMeta) -> str:
         """
+        template <args>
         pre_attrs ret_type name(args) post_attrs;
         """
-        inline = meta.inline
+        header_only = meta.is_header_only() or self.is_template()
         pre_attrs = _unique_list_keep_order(meta.get_pre_attrs())
         post_attrs = _unique_list_keep_order(meta.get_post_attrs())
         return_type = self.return_type
         if isinstance(meta, (ConstructorMeta, DestructorMeta)):
             return_type = ""
         else:
-            if not inline:
+            if not header_only:
                 assert self.return_type != "auto" and self.return_type != "decltype(auto)"
 
         fmt = "{ret_type} {name}({args});"
+        if self.is_template():
+            temp_arg_str = ", ".join(t.to_string() for t in self._template_arguments)
+            fmt = "template <{}>\n".format(temp_arg_str) + fmt
         pre_attrs_str = " ".join(pre_attrs)
         post_attrs_str = " ".join(post_attrs)
         arg_strs = []  # type: List[str]
@@ -374,12 +447,18 @@ class FunctionCode(object):
 
     def get_impl(self, name: str, meta: FunctionMeta, class_name: str = ""):
         """
+        template <args>
         pre_attrs ret_type BoundClass::name(args) post_attrs {body};
         """
-        inline = meta.inline
+        header_only = meta.is_header_only() or self.is_template()
         pre_attrs = _unique_list_keep_order(meta.get_pre_attrs())
+        if isinstance(meta, StaticMemberFunctionMeta) and not header_only:
+            pre_attrs.remove("static")
         post_attrs = _unique_list_keep_order(meta.get_post_attrs())
         fmt = "{ret_type} {bound}{name}({args}) {ctor_inits} {post_attrs} {{"
+        if self.is_template():
+            temp_arg_str = ", ".join(t.to_string() for t in self._template_arguments)
+            fmt = "template <{}>\n".format(temp_arg_str) + fmt
         pre_attrs_str = " ".join(pre_attrs)
         post_attrs_str = " ".join(post_attrs)
         return_type = self.return_type
@@ -391,12 +470,12 @@ class FunctionCode(object):
                                    for k, v in self.ctor_inits)
                 ctor_inits = ": {}".format(string)
         bound = ""
-        if class_name and not inline:
+        if class_name and not header_only:
             bound = "{}::".format(class_name)
         arg_strs = []  # type: List[str]
         for arg in self.arguments:
             arg_fmt = "{type} {name}".format(type=arg.type_str, name=arg.name)
-            if arg.default and inline:
+            if arg.default and header_only:
                 arg_fmt += " = {}".format(arg.default)
             arg_strs.append(arg_fmt)
         arg_str = ", ".join(arg_strs)
@@ -412,6 +491,8 @@ class FunctionCode(object):
         return block
 
     def arg(self, name: str, type: str, default: Optional[str] = None):
+        """add a argument.
+        """
         name_part = name.split(",")
         for part in name_part:
             if not part.strip():
@@ -419,11 +500,35 @@ class FunctionCode(object):
             self.arguments.append(Argument(part.strip(), type, default))
         return self
 
+    def targ(self, name: str, default: Optional[str] = None, template: str = "", packed: bool = False):
+        """add a template type argument.
+        """
+        name_part = name.split(",")
+        for part in name_part:
+            if not part.strip():
+                raise ValueError("you provide a empty name in", name)
+            self._template_arguments.append(TemplateTypeArgument(part.strip(), default, template, packed))
+        return self
+
+    def nontype_targ(self, name: str, type: str, default: Optional[str] = None, packed: bool = False):
+        """add a non-type template argument.
+        """
+        name_part = name.split(",")
+        for part in name_part:
+            if not part.strip():
+                raise ValueError("you provide a empty name in", name)
+            self._template_arguments.append(TemplateNonTypeArgument(part.strip(), type, default, packed))
+        return self
+
     def ret(self, return_type: str):
+        """set function return type.
+        """
         self.return_type = return_type
         return self
 
     def ctor_init(self, name: str, value: str):
+        """append a constructor initializer list
+        """
         self.ctor_inits.append((name, value))
         return self
 
@@ -437,8 +542,6 @@ class FunctionDecl(object):
 class Class(object):
     """
     TODO split user Class and graph node.
-    TODO add build meta interface to forward some dependency to builder.
-    TODO ignore empty class in code generation
     TODO add better virtual function check support by using python mro.
     TODO find a way to implement param class inherit.
     TODO add alias for non-param Class
@@ -1190,7 +1293,7 @@ class CodeGenerator(object):
                 if not isinstance(meta, (ConstructorMeta, DestructorMeta)):
                     assert func_name != cu_name
                 # if isinstance(meta, MemberFunctionMeta):
-                inline = meta.inline
+                header_only = meta.is_header_only() or code_obj.is_template()
                 impl_file_name = meta.impl_loc
                 if not impl_file_name:
                     if isinstance(meta, DestructorMeta):
@@ -1209,7 +1312,7 @@ class CodeGenerator(object):
                 if isinstance(meta, ExternalFunctionMeta):
                     bound_name = ""
                 func_impl_str = code_obj.get_impl(func_name, meta, bound_name)
-                if inline:
+                if header_only:
                     func_decl_str = func_impl_str
                 if isinstance(meta, MemberFunctionMeta):
                     member_functions_index_decl.append((index, func_decl_str))
@@ -1223,7 +1326,7 @@ class CodeGenerator(object):
                     dtors_index_decl.append((index, func_decl_str))
                 else:
                     raise NotImplementedError
-                if not meta.inline:
+                if not header_only:
                     impl_dict_cls[impl_file_name].append(func_impl_str)
 
                 # handle impl-only dependency

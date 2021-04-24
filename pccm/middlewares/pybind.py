@@ -18,6 +18,8 @@ class PybindMethodDecl(object):
     def __init__(self, decl: FunctionDecl, namespace: str, class_name: str):
         self.decl = decl
         self.func_name = decl.meta.name
+        if decl.code.is_template():
+            raise ValueError("pybind can't bind template function")
         if isinstance(decl.meta, ConstructorMeta):
             arg_types = [a.type_str for a in decl.code.arguments]
             self.addr = "pybind11::init<{}>()".format(", ".join(arg_types))
@@ -39,7 +41,7 @@ class PybindMethodDecl(object):
             return ".def({}, {})".format(self.addr, ", ".join(self.args))
         def_stmt = "def"
         if isinstance(self.decl.meta, StaticMemberFunctionMeta):
-            def_stmt = "def_readonly_static"
+            def_stmt = "def_static"
         if self.args:
             return ".{}(\"{}\", {}, {})".format(def_stmt, self.func_name, self.addr,
                                                  ", ".join(self.args))

@@ -32,7 +32,8 @@ def test_core():
 def test_builder():
     cu = Test4()
     lib = builder.build_pybind([cu], Path(__file__).parent / "wtf")
+    assert lib.pccm.test_data.mod.Test4.add_static(1, 2) == 3
 
 
 if __name__ == "__main__":
-    test_core()
+    test_builder()
