@@ -1,42 +1,32 @@
 from typing import List, Optional
 
-from pccm.core import markers
-from pccm.core import MemberFunctionMeta, ExternalFunctionMeta, StaticMemberFunctionMeta, ConstructorMeta, DestructorMeta
+from pccm.core import (ConstructorMeta, DestructorMeta, ExternalFunctionMeta,
+                       MemberFunctionMeta, StaticMemberFunctionMeta, markers)
+
 
 class CudaMemberFunctionMeta(MemberFunctionMeta):
-    def get_pre_attrs(self) -> List[str]:
-        res = super().get_pre_attrs()  # type: List[str]
-        if "__forceinline__" in res and "inline" in res:
-            res.remove("inline")
-        return res
+    def is_header_only(self):
+        return self.inline or "__forceinline__" in self.attrs
+
 
 class CudaStaticMemberFunctionMeta(StaticMemberFunctionMeta):
-    def get_pre_attrs(self) -> List[str]:
-        res = super().get_pre_attrs()  # type: List[str]
-        if "__forceinline__" in res and "inline" in res:
-            res.remove("inline")
-        return res
+    def is_header_only(self):
+        return self.inline or "__forceinline__" in self.attrs
+
 
 class CudaConstructorMeta(ConstructorMeta):
-    def get_pre_attrs(self) -> List[str]:
-        res = super().get_pre_attrs()  # type: List[str]
-        if "__forceinline__" in res and "inline" in res:
-            res.remove("inline")
-        return res
+    def is_header_only(self):
+        return self.inline or "__forceinline__" in self.attrs
+
 
 class CudaDestructorMeta(DestructorMeta):
-    def get_pre_attrs(self) -> List[str]:
-        res = super().get_pre_attrs()  # type: List[str]
-        if "__forceinline__" in res and "inline" in res:
-            res.remove("inline")
-        return res
+    def is_header_only(self):
+        return self.inline or "__forceinline__" in self.attrs
+
 
 class CudaExternalFunctionMeta(ExternalFunctionMeta):
-    def get_pre_attrs(self) -> List[str]:
-        res = super().get_pre_attrs()  # type: List[str]
-        if "__forceinline__" in res and "inline" in res:
-            res.remove("inline")
-        return res
+    def is_header_only(self):
+        return self.inline or "__forceinline__" in self.attrs
 
 
 def cuda_global_function(func=None,
@@ -51,6 +41,7 @@ def cuda_global_function(func=None,
     return markers.external_function(func,
                                      name=name,
                                      inline=inline,
+                                     constexpr=False,
                                      impl_loc=impl_loc,
                                      impl_file_suffix=impl_file_suffix,
                                      attrs=cuda_global_attrs)
@@ -61,13 +52,14 @@ def member_function(func=None,
                     device: bool = False,
                     inline: bool = False,
                     forceinline: bool = False,
+                    constexpr: bool = False,
                     const: bool = False,
                     attrs: Optional[List[str]] = None,
                     impl_loc: str = "",
                     impl_file_suffix: str = ".cu",
                     name=None):
-    if forceinline:
-        inline = True
+    if forceinline or inline:
+        assert forceinline is not inline, "can't set both inline and forceinline"
     cuda_global_attrs = []
     if forceinline:
         cuda_global_attrs.append("__forceinline__")
@@ -79,14 +71,15 @@ def member_function(func=None,
         attrs = []
     attrs.extend(cuda_global_attrs)
     meta = CudaMemberFunctionMeta(name=name,
-                                inline=inline,
-                                virtual=False,
-                                override=False,
-                                final=False,
-                                const=const,
-                                impl_loc=impl_loc,
-                                impl_file_suffix=impl_file_suffix,
-                                attrs=attrs)
+                                  inline=inline,
+                                  constexpr=constexpr,
+                                  virtual=False,
+                                  override=False,
+                                  final=False,
+                                  const=const,
+                                  impl_loc=impl_loc,
+                                  impl_file_suffix=impl_file_suffix,
+                                  attrs=attrs)
     return markers.meta_decorator(func, meta)
 
 
@@ -95,12 +88,13 @@ def static_function(func=None,
                     device: bool = False,
                     inline: bool = False,
                     forceinline: bool = False,
+                    constexpr: bool = False,
                     attrs: Optional[List[str]] = None,
                     impl_loc: str = "",
                     impl_file_suffix: str = ".cu",
                     name=None):
-    if forceinline:
-        inline = True
+    if forceinline or inline:
+        assert forceinline is not inline, "can't set both inline and forceinline"
     cuda_global_attrs = []
     if forceinline:
         cuda_global_attrs.append("__forceinline__")
@@ -114,6 +108,7 @@ def static_function(func=None,
     meta = CudaStaticMemberFunctionMeta(
         name=name,
         inline=inline,
+        constexpr=constexpr,
         attrs=attrs,
         impl_loc=impl_loc,
         impl_file_suffix=impl_file_suffix,
@@ -126,12 +121,13 @@ def external_function(func=None,
                       device: bool = False,
                       inline: bool = False,
                       forceinline: bool = False,
+                      constexpr: bool = False,
                       attrs: Optional[List[str]] = None,
                       impl_loc: str = "",
                       impl_file_suffix: str = ".cu",
                       name=None):
-    if forceinline:
-        inline = True
+    if forceinline or inline:
+        assert forceinline is not inline, "can't set both inline and forceinline"
     cuda_global_attrs = []
     if forceinline:
         cuda_global_attrs.append("__forceinline__")
@@ -145,6 +141,7 @@ def external_function(func=None,
     meta = CudaExternalFunctionMeta(
         name=name,
         inline=inline,
+        constexpr=constexpr,
         attrs=attrs,
         impl_loc=impl_loc,
         impl_file_suffix=impl_file_suffix,
@@ -157,12 +154,13 @@ def constructor(func=None,
                 device: bool = False,
                 inline: bool = False,
                 forceinline: bool = False,
+                constexpr: bool = False,
                 attrs: Optional[List[str]] = None,
                 impl_loc: str = "",
                 impl_file_suffix: str = ".cu",
                 name=None):
-    if forceinline:
-        inline = True
+    if forceinline or inline:
+        assert forceinline is not inline, "can't set both inline and forceinline"
     cuda_global_attrs = []
     if forceinline:
         cuda_global_attrs.append("__forceinline__")
@@ -175,6 +173,7 @@ def constructor(func=None,
     attrs.extend(cuda_global_attrs)
     meta = CudaConstructorMeta(
         inline=inline,
+        constexpr=constexpr,
         attrs=attrs,
         impl_loc=impl_loc,
         impl_file_suffix=impl_file_suffix,

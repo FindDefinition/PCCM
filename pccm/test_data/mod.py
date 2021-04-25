@@ -18,7 +18,7 @@ class Test3(pccm.Class):
         code.raw("""
         auto tst1 = Test2();
         auto tst2 = PP();
-        return tst1.add(a, b) + tst2.add_template(a, b);
+        return tst1.add(a, b) + tst2.add_template(a, b) + tst2.add_func_template(a, b);
         """).arg("a,b", "int").ret("int")
         return code
 
@@ -33,5 +33,14 @@ class Test4(Test3):
         code = pccm.FunctionCode("")
         code.raw("""
         return add(a, b);
+        """).arg("a,b", "int").ret("int")
+        return code
+
+    @pccm.pybind.pybind_mark
+    @pccm.static_function
+    def add_static(self):
+        code = pccm.FunctionCode("")
+        code.raw("""
+        return a + b;
         """).arg("a,b", "int").ret("int")
         return code
