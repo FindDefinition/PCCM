@@ -385,7 +385,7 @@ class FunctionCode(object):
 
     @contextlib.contextmanager
     def else_(self):
-        with self.block("else".format(if_test)):
+        with self.block("else"):
             yield
 
     @contextlib.contextmanager
