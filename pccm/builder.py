@@ -70,12 +70,12 @@ def build_pybind(cus: List[Class],
         mk_init = Path(out_path)
         init_path = (mk_init / "__init__.pyi")
         if not init_path.exists():
-            with open(init_path, "w") as f:
+            with init_path.open("w") as f:
                 f.write("")
         for part in k_path_parts:
             init_path = (mk_init / part / "__init__.pyi")
             if not init_path.exists():
-                with open(init_path, "w") as f:
+                with init_path.open("w") as f:
                     f.write("")
             mk_init = mk_init / part
         with pyi_path.open("w") as f:

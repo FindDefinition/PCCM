@@ -557,7 +557,7 @@ class Class(object):
     TODO add param class resume if class provide hash method
     TODO support dynamic method
 
-    TODO handle inherited members
+    TODO handle inherited codes
     """
     def __init__(self):
         self._this_cls_type = None # type: Optional[Type[Class]]
