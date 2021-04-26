@@ -149,3 +149,5 @@ docs_out
 *.lib
 
 __version__.py
+
+*.pyi

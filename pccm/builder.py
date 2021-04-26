@@ -44,7 +44,7 @@ def build_pybind(cus: List[Class],
     if out_root is None:
         out_root = build_dir
     build_dir = Path(build_dir)
-    build_dir.mkdir(exist_ok=True, parents=True)
+    build_dir.mkdir(exist_ok=True, parents=True, mode=0o755)
     pb = pybind.Pybind11(mod_name, mod_name, pybind_file_suffix)
     cg = CodeGenerator([pb], verbose=verbose)
     cg.build_graph(cus, namespace_root)
@@ -61,6 +61,27 @@ def build_pybind(cus: List[Class],
     header_dict, impl_dict = cg.code_generation(pb.get_code_units())
     cg.code_written(HEADER_ROOT, header_dict, code_fmt)
     paths += cg.code_written(SRC_ROOT, impl_dict, code_fmt)
+    pyi = pb.generate_python_interface()
+    for k, v in pyi.items():
+        k_path = k.replace(".", "/") + ".pyi"
+        k_path_parts = k.split(".")[:-1]
+        pyi_path = Path(out_path) / k_path
+        pyi_path.parent.mkdir(exist_ok=True, parents=True, mode=0o755)
+        mk_init = Path(out_path)
+        init_path = (mk_init / "__init__.pyi")
+        if not init_path.exists():
+            with open(init_path, "w") as f:
+                f.write("")
+        for part in k_path_parts:
+            init_path = (mk_init / part / "__init__.pyi")
+            if not init_path.exists():
+                with open(init_path, "w") as f:
+                    f.write("")
+            mk_init = mk_init / part
+        with pyi_path.open("w") as f:
+            f.write(v)
+
+
     return ccimport.ccimport(
         paths,
         out_path,

@@ -210,12 +210,15 @@ class Argument(object):
                  name: str,
                  type: str,
                  default: Optional[str] = None,
-                 array: Optional[str] = None):
+                 array: Optional[str] = None,
+                 pyanno: Optional[str] = None):
         self.name = name
         self.type_str = type  # type: str
         self.default = default
         self.array = array
-
+        self.pyanno = pyanno
+        if pyanno is not None:
+            assert len(pyanno) != 0
 
 class Typedef(object):
     def __init__(self, name: str, content: str):
@@ -239,15 +242,18 @@ class StaticConst(object):
 
 class Member(Argument):
     def __init__(self,
+                cls_type: Optional[Type["Class"]],
                  name: str,
                  type: str,
                  default: Optional[str] = None,
                  array: Optional[str] = None,
+                 pyanno: Optional[str] = None,
                  mw_metas: Optional[List[MiddlewareMeta]] = None):
-        super().__init__(name, type, default, array)
+        super().__init__(name, type, default, array, pyanno)
         if mw_metas is None:
             mw_metas = []
         self.mw_metas = mw_metas
+        self.cls_type = cls_type
 
     def to_string(self) -> str:
         if self.array is None:
@@ -317,6 +323,8 @@ class FunctionCode(object):
         self._template_arguments = [] # type: List[Union[TemplateTypeArgument, TemplateNonTypeArgument]]
         self._blocks = [Block("", [], indent=0)]  # type: List[Block]
         self.raw(code)
+
+        self.ret_pyanno = None # type: Optional[str]
 
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0
@@ -490,14 +498,14 @@ class FunctionCode(object):
         block = Block(prefix_fmt, self._blocks, "}")
         return block
 
-    def arg(self, name: str, type: str, default: Optional[str] = None):
+    def arg(self, name: str, type: str, default: Optional[str] = None, pyanno: Optional[str] = None):
         """add a argument.
         """
         name_part = name.split(",")
         for part in name_part:
             if not part.strip():
                 raise ValueError("you provide a empty name in", name)
-            self.arguments.append(Argument(part.strip(), type, default))
+            self.arguments.append(Argument(part.strip(), type, default, pyanno=pyanno))
         return self
 
     def targ(self, name: str, default: Optional[str] = None, template: str = "", packed: bool = False):
@@ -520,10 +528,11 @@ class FunctionCode(object):
             self._template_arguments.append(TemplateNonTypeArgument(part.strip(), type, default, packed))
         return self
 
-    def ret(self, return_type: str):
+    def ret(self, return_type: str, pyanno: Optional[str] = None ):
         """set function return type.
         """
         self.return_type = return_type
+        self.ret_pyanno = pyanno
         return self
 
     def ctor_init(self, name: str, value: str):
@@ -547,8 +556,11 @@ class Class(object):
     TODO add alias for non-param Class
     TODO add param class resume if class provide hash method
     TODO support dynamic method
+
+    TODO handle inherited members
     """
     def __init__(self):
+        self._this_cls_type = None # type: Optional[Type[Class]]
         self._members = []  # type: List[Member]
         if compat.Python3_7AndLater:
             self._param_class = {}  # type: Dict[str, ParameterizedClass]
@@ -587,6 +599,9 @@ class Class(object):
 
         self._build_meta = BuildMeta()
 
+    def set_this_class_type(self, this_cls_type: Type["Class"]):
+        self._this_cls_type = this_cls_type
+
     @property
     def build_meta(self) -> BuildMeta:
         return self._build_meta
@@ -622,13 +637,14 @@ class Class(object):
                    type: str,
                    default: Optional[str] = None,
                    array: Optional[str] = None,
+                   pyanno: Optional[str] = None,
                    mw_metas: Optional[List[MiddlewareMeta]] = None):
         name_part = name.split(",")
         for part in name_part:
             if not part.strip():
                 raise ValueError("you provide a empty name in", name)
             self._members.append(
-                Member(part.strip(), type, default, array, mw_metas))
+                Member(self._this_cls_type, part.strip(), type, default, array, pyanno, mw_metas))
 
     def add_dependency(self, *no_param_class_cls: Type["Class"]):
         # TODO enable name alias for Class
@@ -734,11 +750,20 @@ class Class(object):
     def get_parent_class(self):  # -> Optional[Type["Class"]]
         """TODO find a better way to check invalid param class inherit
         """
-        mro = inspect.getmro(type(self))
-        if mro[1] is not Class and mro[1] is not ParameterizedClass:
+        pccm_base_types = [] # List[Type[Class]]
+        for base in type(self).__bases__:
+            if issubclass(base, Class):
+                pccm_base_types.append(base)
+        assert len(pccm_base_types) == 1, "you can only inherit one class."
+        pccm_base = pccm_base_types[0]
+        if pccm_base is not Class and base is not ParameterizedClass:
             # assert not issubclass(mro[1], ParameterizedClass), "you can't inherit a param class."
-            if not issubclass(mro[1], ParameterizedClass):
-                return mro[1]
+            if not issubclass(pccm_base, ParameterizedClass):
+                # you inherit a class. you must set _this_cls_type by super().__init__(__class__)
+                msg = ("you must use self.set_this_class_type(__class__) to init this class type"
+                        " when you inherit pccm.Class")
+                assert self._this_cls_type is not None, msg
+                return pccm_base
         return None
 
     def get_class_deps(self) -> List[Type["Class"]]:
@@ -801,7 +826,8 @@ class Class(object):
         dep_alias = self.get_common_dependency_aliases()
         typedef_strs = [d.to_string() for d in self._typedefs]
         sc_strs = [d.to_string() for d in self._static_consts]
-        member_def_strs = [d.to_string() for d in self._members]
+
+        member_def_strs = [d.to_string() for d in self._members if d.cls_type is self._this_cls_type]
         parent_class_alias = None  # type: Optional[str]
         parent = self.get_parent_class()
         if parent is not None:
@@ -1017,10 +1043,10 @@ class ParameterizedClass(Class):
 
 
 class ManualClass(ParameterizedClass):
-    def handle_function_decl(self, cu: Class, func_decl: FunctionDecl):
+    def handle_function_decl(self, cu: Class, func_decl: FunctionDecl, mw_meta: MiddlewareMeta):
         pass
 
-    def handle_member(self, cu: Class, member_decl: Member):
+    def handle_member(self, cu: Class, member_decl: Member, mw_meta: MiddlewareMeta):
         pass
 
 
@@ -1048,10 +1074,10 @@ class AutoClassGenerator(ParameterizedClass):
 class ManualClassTransformer(object):
     """modify existing Class.
     """
-    def handle_function_decl(self, cu: Class, func_decl: FunctionDecl):
+    def handle_function_decl(self, cu: Class, func_decl: FunctionDecl, mw_meta: MiddlewareMeta):
         pass
 
-    def handle_member(self, cu: Class, member_decl: Member):
+    def handle_member(self, cu: Class, member_decl: Member, mw_meta: MiddlewareMeta):
         pass
 
 
@@ -1093,25 +1119,26 @@ class CodeGenerator(object):
             mw_type = type(middleware)
             if isinstance(middleware, ManualClassGenerator):
                 for k, cu in uid_to_cu.items():
-                    decls_with_meta = []  # type: List[FunctionDecl]
-                    members_with_meta = []  # type: List[Member]
+                    decls_with_meta = []  # type: List[Tuple[FunctionDecl, MiddlewareMeta]]
+                    members_with_meta = []  # type: List[Tuple[Member, MiddlewareMeta]]
+                    # TODO only one meta is allowed
                     for decl in cu._function_decls:
                         for mw_meta in decl.meta.mw_metas:
                             if mw_meta.type is mw_type:
-                                decls_with_meta.append(decl)
+                                decls_with_meta.append((decl, mw_meta))
                     for member in cu._members:
                         for mw_meta in member.mw_metas:
                             if mw_meta.type is mw_type:
-                                members_with_meta.append(member)
+                                members_with_meta.append((member, mw_meta))
                     if not decls_with_meta and not members_with_meta:
                         continue
                     new_pcls = middleware.create_manual_class(cu)
                     if new_pcls.namespace is None:
                         new_pcls.namespace = cu.namespace + "." + middleware.subnamespace
-                    for decl in decls_with_meta:
-                        new_pcls.handle_function_decl(cu, decl)
-                    for member in members_with_meta:
-                        new_pcls.handle_member(cu, member)
+                    for decl, mw_meta in decls_with_meta:
+                        new_pcls.handle_function_decl(cu, decl, mw_meta)
+                    for member, mw_meta in members_with_meta:
+                        new_pcls.handle_member(cu, member, mw_meta)
                     uid = new_pcls.namespace + "-" + type(new_pcls).__name__
                     new_uid_to_cu[uid] = new_pcls
             else:
