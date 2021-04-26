@@ -7,7 +7,10 @@ class Test3(pccm.Class):
         super().__init__()
         self.add_dependency(Test2)
         self.add_param_class("ns1", PTest1(3, "int"), "PP")
-        self.add_member("hahaha", "int", pyanno="int", mw_metas=[pccm.pybind.Pybind11PropMeta()])
+        self.add_member("hahaha",
+                        "int",
+                        pyanno="int",
+                        mw_metas=[pccm.pybind.Pybind11PropMeta()])
 
     @pccm.pybind.pybind_mark
     @pccm.member_function(inline=True)

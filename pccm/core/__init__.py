@@ -52,7 +52,7 @@ class FunctionMeta(object):
         return []
 
     def is_header_only(self):
-        return self.inline
+        return self.inline or self.constexpr
 
 
 def get_func_meta_except(func) -> FunctionMeta:
@@ -212,13 +212,15 @@ class Argument(object):
                  default: Optional[str] = None,
                  array: Optional[str] = None,
                  pyanno: Optional[str] = None):
-        self.name = name
-        self.type_str = type  # type: str
+        self.name = name.strip()
+        self.type_str = type.strip()  # type: str
         self.default = default
         self.array = array
         self.pyanno = pyanno
         if pyanno is not None:
+            self.pyanno = pyanno.strip()
             assert len(pyanno) != 0
+
 
 class Typedef(object):
     def __init__(self, name: str, content: str):
@@ -242,7 +244,7 @@ class StaticConst(object):
 
 class Member(Argument):
     def __init__(self,
-                cls_type: Optional[Type["Class"]],
+                 cls_type,
                  name: str,
                  type: str,
                  default: Optional[str] = None,
@@ -253,7 +255,7 @@ class Member(Argument):
         if mw_metas is None:
             mw_metas = []
         self.mw_metas = mw_metas
-        self.cls_type = cls_type
+        self.cls_type = cls_type  # type: Optional[Type[Class]]
 
     def to_string(self) -> str:
         if self.array is None:
@@ -270,11 +272,16 @@ class Member(Argument):
                 return "{} {}[{}] = {};".format(self.type_str, self.name,
                                                 self.array, self.default)
 
+
 class TemplateTypeArgument(object):
-    def __init__(self, name: str, default: Optional[str] = None, template: str = "", packed: bool = False):
-        self.name = name 
+    def __init__(self,
+                 name: str,
+                 default: Optional[str] = None,
+                 template: str = "",
+                 packed: bool = False):
+        self.name = name
         self.template = template
-        self.packed = packed 
+        self.packed = packed
         self.default = default
 
     def to_string(self) -> str:
@@ -291,11 +298,16 @@ class TemplateTypeArgument(object):
             res += " = {}".format(self.default)
         return res
 
+
 class TemplateNonTypeArgument(object):
-    def __init__(self, name: str, type: str, default: Optional[str] = None, packed: bool = False):
-        self.name = name 
+    def __init__(self,
+                 name: str,
+                 type: str,
+                 default: Optional[str] = None,
+                 packed: bool = False):
+        self.name = name
         self.type = type
-        self.packed = packed 
+        self.packed = packed
         self.default = default
 
     def to_string(self) -> str:
@@ -309,6 +321,7 @@ class TemplateNonTypeArgument(object):
             res += " = {}".format(self.default)
         return res
 
+
 class FunctionCode(object):
     def __init__(self,
                  code: str,
@@ -320,11 +333,12 @@ class FunctionCode(object):
         if ctor_inits is None:
             ctor_inits = []
         self.ctor_inits = ctor_inits
-        self._template_arguments = [] # type: List[Union[TemplateTypeArgument, TemplateNonTypeArgument]]
+        self._template_arguments = [
+        ]  # type: List[Union[TemplateTypeArgument, TemplateNonTypeArgument]]
         self._blocks = [Block("", [], indent=0)]  # type: List[Block]
         self.raw(code)
 
-        self.ret_pyanno = None # type: Optional[str]
+        self.ret_pyanno = None  # type: Optional[str]
 
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0
@@ -358,7 +372,6 @@ class FunctionCode(object):
         yield
         last_block = self._blocks.pop()
         self._blocks[-1].body.append(last_block)
-
 
     @contextlib.contextmanager
     def for_(self, for_stmt: str, prefix: str = ""):
@@ -433,9 +446,11 @@ class FunctionCode(object):
                 assert self.return_type != "auto" and self.return_type != "decltype(auto)"
 
         fmt = "{ret_type} {name}({args});"
+        template_fmt = ""
         if self.is_template():
-            temp_arg_str = ", ".join(t.to_string() for t in self._template_arguments)
-            fmt = "template <{}>\n".format(temp_arg_str) + fmt
+            temp_arg_str = ", ".join(t.to_string()
+                                     for t in self._template_arguments)
+            template_fmt = "template <{}>\n".format(temp_arg_str)
         pre_attrs_str = " ".join(pre_attrs)
         post_attrs_str = " ".join(post_attrs)
         arg_strs = []  # type: List[str]
@@ -450,7 +465,7 @@ class FunctionCode(object):
                                 args=arg_str,
                                 post_attrs=post_attrs_str)
         if pre_attrs_str:
-            prefix_fmt = pre_attrs_str + " " + prefix_fmt
+            prefix_fmt = template_fmt + pre_attrs_str + " " + prefix_fmt
         return prefix_fmt
 
     def get_impl(self, name: str, meta: FunctionMeta, class_name: str = ""):
@@ -462,11 +477,16 @@ class FunctionCode(object):
         pre_attrs = _unique_list_keep_order(meta.get_pre_attrs())
         if isinstance(meta, StaticMemberFunctionMeta) and not header_only:
             pre_attrs.remove("static")
+        if "virtual" in pre_attrs:
+            pre_attrs.remove("virtual")
         post_attrs = _unique_list_keep_order(meta.get_post_attrs())
         fmt = "{ret_type} {bound}{name}({args}) {ctor_inits} {post_attrs} {{"
+        template_fmt = ""
+
         if self.is_template():
-            temp_arg_str = ", ".join(t.to_string() for t in self._template_arguments)
-            fmt = "template <{}>\n".format(temp_arg_str) + fmt
+            temp_arg_str = ", ".join(t.to_string()
+                                     for t in self._template_arguments)
+            template_fmt = "template <{}>\n".format(temp_arg_str)
         pre_attrs_str = " ".join(pre_attrs)
         post_attrs_str = " ".join(post_attrs)
         return_type = self.return_type
@@ -494,41 +514,56 @@ class FunctionCode(object):
                                 ctor_inits=ctor_inits,
                                 post_attrs=post_attrs_str)
         if pre_attrs_str:
-            prefix_fmt = pre_attrs_str + " " + prefix_fmt
+            prefix_fmt = template_fmt + pre_attrs_str + " " + prefix_fmt
         block = Block(prefix_fmt, self._blocks, "}")
         return block
 
-    def arg(self, name: str, type: str, default: Optional[str] = None, pyanno: Optional[str] = None):
+    def arg(self,
+            name: str,
+            type: str,
+            default: Optional[str] = None,
+            pyanno: Optional[str] = None):
         """add a argument.
         """
         name_part = name.split(",")
         for part in name_part:
             if not part.strip():
                 raise ValueError("you provide a empty name in", name)
-            self.arguments.append(Argument(part.strip(), type, default, pyanno=pyanno))
+            self.arguments.append(
+                Argument(part.strip(), type, default, pyanno=pyanno))
         return self
 
-    def targ(self, name: str, default: Optional[str] = None, template: str = "", packed: bool = False):
+    def targ(self,
+             name: str,
+             default: Optional[str] = None,
+             template: str = "",
+             packed: bool = False):
         """add a template type argument.
         """
         name_part = name.split(",")
         for part in name_part:
             if not part.strip():
                 raise ValueError("you provide a empty name in", name)
-            self._template_arguments.append(TemplateTypeArgument(part.strip(), default, template, packed))
+            self._template_arguments.append(
+                TemplateTypeArgument(part.strip(), default, template, packed))
         return self
 
-    def nontype_targ(self, name: str, type: str, default: Optional[str] = None, packed: bool = False):
+    def nontype_targ(self,
+                     name: str,
+                     type: str,
+                     default: Optional[str] = None,
+                     packed: bool = False):
         """add a non-type template argument.
         """
         name_part = name.split(",")
         for part in name_part:
             if not part.strip():
                 raise ValueError("you provide a empty name in", name)
-            self._template_arguments.append(TemplateNonTypeArgument(part.strip(), type, default, packed))
+            self._template_arguments.append(
+                TemplateNonTypeArgument(part.strip(), type, default, packed))
         return self
 
-    def ret(self, return_type: str, pyanno: Optional[str] = None ):
+    def ret(self, return_type: str, pyanno: Optional[str] = None):
         """set function return type.
         """
         self.return_type = return_type
@@ -560,7 +595,7 @@ class Class(object):
     TODO handle inherited codes
     """
     def __init__(self):
-        self._this_cls_type = None # type: Optional[Type[Class]]
+        self._this_cls_type = None  # type: Optional[Type[Class]]
         self._members = []  # type: List[Member]
         if compat.Python3_7AndLater:
             self._param_class = {}  # type: Dict[str, ParameterizedClass]
@@ -644,7 +679,8 @@ class Class(object):
             if not part.strip():
                 raise ValueError("you provide a empty name in", name)
             self._members.append(
-                Member(self._this_cls_type, part.strip(), type, default, array, pyanno, mw_metas))
+                Member(self._this_cls_type, part.strip(), type, default, array,
+                       pyanno, mw_metas))
 
     def add_dependency(self, *no_param_class_cls: Type["Class"]):
         # TODO enable name alias for Class
@@ -686,19 +722,22 @@ class Class(object):
                 self.add_dependency(npcls)
 
     def add_impl_only_param_class(self,
-                                  func,
+                                  func_or_list_funcs: Union[Callable,
+                                                            List[Callable]],
                                   subnamespace: str,
                                   param_class: "ParameterizedClass",
                                   name_alias: Optional[str] = None):
-        if inspect.ismethod(func):
-            func = func.__func__
-
-        func_meta = get_func_meta_except(func)
-        if func_meta.inline:
-            raise ValueError("inline function can't have impl-only dep")
-        if func not in self._impl_only_param_cls_dep:
-            self._impl_only_param_cls_dep[func] = []
-        self._impl_only_param_cls_dep[func].append(param_class)
+        if not isinstance(func_or_list_funcs, list):
+            func_or_list_funcs = [func_or_list_funcs]
+        for func in func_or_list_funcs:
+            if inspect.ismethod(func):
+                func = func.__func__
+            func_meta = get_func_meta_except(func)
+            if func_meta.inline:
+                raise ValueError("inline function can't have impl-only dep")
+            if func not in self._impl_only_param_cls_dep:
+                self._impl_only_param_cls_dep[func] = []
+            self._impl_only_param_cls_dep[func].append(param_class)
         return self.add_param_class(subnamespace, param_class, name_alias)
 
     def add_impl_main(self,
@@ -729,10 +768,11 @@ class Class(object):
         """
         self._code_after_class.append(code)
 
-    def add_include(self, inc_path: str):
+    def add_include(self, *inc_path: str):
         """can be used for empty class for external dependency.
         """
-        self._includes.append("#include <{}>".format(inc_path))
+        for p in inc_path:
+            self._includes.append("#include <{}>".format(p))
 
     @property
     def include_file(self) -> Optional[str]:
@@ -750,7 +790,7 @@ class Class(object):
     def get_parent_class(self):  # -> Optional[Type["Class"]]
         """TODO find a better way to check invalid param class inherit
         """
-        pccm_base_types = [] # List[Type[Class]]
+        pccm_base_types = []  # List[Type[Class]]
         for base in type(self).__bases__:
             if issubclass(base, Class):
                 pccm_base_types.append(base)
@@ -760,8 +800,9 @@ class Class(object):
             # assert not issubclass(mro[1], ParameterizedClass), "you can't inherit a param class."
             if not issubclass(pccm_base, ParameterizedClass):
                 # you inherit a class. you must set _this_cls_type by super().__init__(__class__)
-                msg = ("you must use self.set_this_class_type(__class__) to init this class type"
-                        " when you inherit pccm.Class")
+                msg = (
+                    "you must use self.set_this_class_type(__class__) to init this class type"
+                    " when you inherit pccm.Class")
                 assert self._this_cls_type is not None, msg
                 return pccm_base
         return None
@@ -827,7 +868,10 @@ class Class(object):
         typedef_strs = [d.to_string() for d in self._typedefs]
         sc_strs = [d.to_string() for d in self._static_consts]
 
-        member_def_strs = [d.to_string() for d in self._members if d.cls_type is self._this_cls_type]
+        member_def_strs = [
+            d.to_string() for d in self._members
+            if d.cls_type is self._this_cls_type
+        ]
         parent_class_alias = None  # type: Optional[str]
         parent = self.get_parent_class()
         if parent is not None:
@@ -1043,10 +1087,12 @@ class ParameterizedClass(Class):
 
 
 class ManualClass(ParameterizedClass):
-    def handle_function_decl(self, cu: Class, func_decl: FunctionDecl, mw_meta: MiddlewareMeta):
+    def handle_function_decl(self, cu: Class, func_decl: FunctionDecl,
+                             mw_meta: MiddlewareMeta):
         pass
 
-    def handle_member(self, cu: Class, member_decl: Member, mw_meta: MiddlewareMeta):
+    def handle_member(self, cu: Class, member_decl: Member,
+                      mw_meta: MiddlewareMeta):
         pass
 
 
@@ -1074,10 +1120,12 @@ class AutoClassGenerator(ParameterizedClass):
 class ManualClassTransformer(object):
     """modify existing Class.
     """
-    def handle_function_decl(self, cu: Class, func_decl: FunctionDecl, mw_meta: MiddlewareMeta):
+    def handle_function_decl(self, cu: Class, func_decl: FunctionDecl,
+                             mw_meta: MiddlewareMeta):
         pass
 
-    def handle_member(self, cu: Class, member_decl: Member, mw_meta: MiddlewareMeta):
+    def handle_member(self, cu: Class, member_decl: Member,
+                      mw_meta: MiddlewareMeta):
         pass
 
 
@@ -1119,8 +1167,10 @@ class CodeGenerator(object):
             mw_type = type(middleware)
             if isinstance(middleware, ManualClassGenerator):
                 for k, cu in uid_to_cu.items():
-                    decls_with_meta = []  # type: List[Tuple[FunctionDecl, MiddlewareMeta]]
-                    members_with_meta = []  # type: List[Tuple[Member, MiddlewareMeta]]
+                    decls_with_meta = [
+                    ]  # type: List[Tuple[FunctionDecl, MiddlewareMeta]]
+                    members_with_meta = [
+                    ]  # type: List[Tuple[Member, MiddlewareMeta]]
                     # TODO only one meta is allowed
                     for decl in cu._function_decls:
                         for mw_meta in decl.meta.mw_metas:

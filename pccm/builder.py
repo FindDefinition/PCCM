@@ -81,7 +81,7 @@ def build_pybind(cus: List[Class],
         with pyi_path.open("w") as f:
             f.write(v)
 
-
+    print("START BUILD")
     return ccimport.ccimport(
         paths,
         out_path,

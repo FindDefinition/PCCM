@@ -14,6 +14,5 @@ def test_core():
     assert lib.pccm.test_data.mod.Test4.add_static(1, 2) == 3
 
 
-
 if __name__ == "__main__":
     test_core()
