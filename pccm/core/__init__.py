@@ -8,9 +8,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 from ccimport import compat, loader
+
 from pccm.constants import PCCM_FUNC_META_KEY, PCCM_MAGIC_STRING
 from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
+
+_HEADER_ONLY_PRE_ATTRS = set(["static", "virtual"])  # type: Set[str]
+_HEADER_ONLY_POST_ATTRS = set(["final", "override"])  # type: Set[str]
 
 
 class MiddlewareMeta(object):
@@ -430,6 +434,20 @@ class FunctionCode(object):
     def unpack(self, args: list) -> str:
         return ", ".join(map(str, args))
 
+    def _clean_pre_attrs_impl(self, attrs: List[str]):
+        res_attrs = []  # type: List[str]
+        for attr in attrs:
+            if attr not in _HEADER_ONLY_PRE_ATTRS:
+                res_attrs.append(attr)
+        return res_attrs
+
+    def _clean_post_attrs_impl(self, attrs: List[str]):
+        res_attrs = []  # type: List[str]
+        for attr in attrs:
+            if attr not in _HEADER_ONLY_POST_ATTRS:
+                res_attrs.append(attr)
+        return res_attrs
+
     def get_sig(self, name: str, meta: FunctionMeta) -> str:
         """
         template <args>
@@ -445,7 +463,7 @@ class FunctionCode(object):
             if not header_only:
                 assert self.return_type != "auto" and self.return_type != "decltype(auto)"
 
-        fmt = "{ret_type} {name}({args});"
+        fmt = "{ret_type} {name}({args}) {post_attrs};"
         template_fmt = ""
         if self.is_template():
             temp_arg_str = ", ".join(t.to_string()
@@ -475,11 +493,10 @@ class FunctionCode(object):
         """
         header_only = meta.is_header_only() or self.is_template()
         pre_attrs = _unique_list_keep_order(meta.get_pre_attrs())
-        if isinstance(meta, StaticMemberFunctionMeta) and not header_only:
-            pre_attrs.remove("static")
-        if "virtual" in pre_attrs:
-            pre_attrs.remove("virtual")
         post_attrs = _unique_list_keep_order(meta.get_post_attrs())
+        if not header_only:
+            pre_attrs = self._clean_pre_attrs_impl(pre_attrs)
+            post_attrs = self._clean_post_attrs_impl(post_attrs)
         fmt = "{ret_type} {bound}{name}({args}) {ctor_inits} {post_attrs} {{"
         template_fmt = ""
 
@@ -566,14 +583,14 @@ class FunctionCode(object):
     def ret(self, return_type: str, pyanno: Optional[str] = None):
         """set function return type.
         """
-        self.return_type = return_type
+        self.return_type = return_type.strip()
         self.ret_pyanno = pyanno
         return self
 
     def ctor_init(self, name: str, value: str):
         """append a constructor initializer list
         """
-        self.ctor_inits.append((name, value))
+        self.ctor_inits.append((name.strip(), value.strip()))
         return self
 
 
@@ -1306,6 +1323,7 @@ class CodeGenerator(object):
                      root: Union[str, Path],
                      code_dict: Dict[str, CodeSection],
                      code_fmt: Optional[CodeFormatter] = None):
+        # TODO insert md5 to code to detect manual code change
         root_path = Path(root)
         all_paths = []  # type: List[Path]
         if code_fmt is None:

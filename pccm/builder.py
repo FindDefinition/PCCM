@@ -2,11 +2,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 import ccimport
+from ccimport.buildtools.writer import DEFAULT_MSVC_DEP_PREFIX
 
 from pccm.core import Class, CodeFormatter, CodeGenerator
 from pccm.core.buildmeta import BuildMeta
 from pccm.middlewares import pybind
-from ccimport.buildtools.writer import DEFAULT_MSVC_DEP_PREFIX
 
 
 def build_pybind(cus: List[Class],

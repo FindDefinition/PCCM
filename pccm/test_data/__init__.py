@@ -7,7 +7,7 @@ class Test1(pccm.Class):
         super().__init__()
         self.add_dependency(stl.STL)
 
-    @pccm.member_function
+    @pccm.member_function(const=True, virtual=True)
     def add(self):
         return pccm.FunctionCode(
             """

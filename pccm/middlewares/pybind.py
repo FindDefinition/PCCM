@@ -1,13 +1,17 @@
-from typing import Dict, List, Union, Optional
+import ast
 from collections import OrderedDict
+from enum import Enum
+from typing import Dict, List, Optional, Union
+
+from ccimport import compat
+
 from pccm.core import (Class, ConstructorMeta, ExternalFunctionMeta,
                        FunctionDecl, ManualClass, ManualClassGenerator, Member,
                        MemberFunctionMeta, MiddlewareMeta,
                        StaticMemberFunctionMeta)
+from pccm.core.buildmeta import _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 from pccm.core.markers import middleware_decorator
-from pccm.core.buildmeta import _unique_list_keep_order
-from enum import Enum
 
 _AUTO_ANNO_TYPES = {
     "int": "int",
@@ -30,6 +34,63 @@ _AUTO_ANNO_TYPES = {
     "std::string": "str",
     "void": "None",
 }  # type: Dict[str, str]
+
+
+def _get_attribute_name(node, parts):
+    if isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        return _get_attribute_name(node.value, parts)
+    elif isinstance(node, ast.Name):
+        parts.append(node.id)
+    else:
+        raise NotImplementedError
+
+
+def get_attribute_name_parts(node):
+    parts = []
+    _get_attribute_name(node, parts)
+    return parts[::-1]
+
+
+def _anno_parser(node: ast.AST, imports: List[str]) -> str:
+    if isinstance(node, ast.Module):
+        assert len(node.body) == 1
+        return _anno_parser(node.body[0], imports)
+    if isinstance(node, ast.Expr):
+        return _anno_parser(node.value, imports)
+    elif isinstance(node, ast.Subscript):
+        assert isinstance(node.value, (ast.Name, ast.Attribute))
+        if compat.Python3_9AndLater:
+            # >= 3.9 ast.Index is deprecated
+            assert isinstance(node.slice, ast.Tuple)
+            return "{}[{}]".format(_anno_parser(node.value, imports),
+                                   _anno_parser(node.slice, imports))
+        else:
+            assert isinstance(node.slice, ast.Index)
+            assert isinstance(node.slice.value, ast.Tuple)
+            return "{}[{}]".format(_anno_parser(node.value, imports),
+                                   _anno_parser(node.slice.value, imports))
+    elif isinstance(node, ast.Tuple):
+        return ", ".join(_anno_parser(e, imports) for e in node.elts)
+    elif isinstance(node, ast.Name):
+        return node.id
+    elif isinstance(node, ast.Attribute):
+        value_parts = get_attribute_name_parts(node)  # type: List[str]
+        from_import = "from {} import {}".format(".".join(value_parts[:-1]),
+                                                 value_parts[-1])
+        imports.append(from_import)
+        return value_parts[-1]
+    else:
+        msg = "pyanno only support format like name.attr[nested_name.attr[name1, name2], name3]\n"
+        msg += "but we get ast node {}".format(str(type(node)))
+        raise ValueError(msg)
+
+
+def python_anno_parser(anno_str: str):
+    tree = ast.parse(anno_str)
+    imports = []  # type: List[str]
+    refined_name = _anno_parser(tree, imports)
+    return refined_name, imports
 
 
 class Pybind11Meta(MiddlewareMeta):
@@ -232,14 +293,21 @@ class Pybind11ClassHandler(ManualClass):
                            "\n".join(code), self.file_suffix)
         self.built = True
 
-    def _get_import_and_anno_from_raw(self, anno_raw: str):
-        mod_parts = anno_raw.split(".")
-        if len(mod_parts) == 1:
-            from_import = None
-        else:
-            from_import = "from {} import {}".format(".".join(mod_parts[:-1]),
-                                                     mod_parts[-1])
-        return mod_parts[-1], from_import
+    def _extract_anno_with_cache(self, user_anno: Optional[str], type_str: str,
+                                 type_to_anno_cache: Dict[str, str]):
+        from_imports = []  # type: List[str]
+        if user_anno is None:
+            if type_str in _AUTO_ANNO_TYPES:
+                user_anno = _AUTO_ANNO_TYPES[type_str]
+        if user_anno is None:
+            # find anno in cache
+            if type_str in type_to_anno_cache:
+                user_anno = type_to_anno_cache[type_str]
+        anno = None
+        if user_anno is not None:
+            anno, from_imports = python_anno_parser(user_anno)
+            type_to_anno_cache[type_str] = anno
+        return anno, from_imports
 
     def generate_python_interface(self):
         """
@@ -250,9 +318,11 @@ class Pybind11ClassHandler(ManualClass):
         TODO handle c++ operators
         TODO better code
         TODO auto generate STL annotations
+        TODO insert docstring if exists
         """
         init_import = "from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union"
         ns_to_interface = OrderedDict()  # type: Dict[str, str]
+        type_to_anno_cache = {}  # type: Dict[str, str]
         for ns, cls_to_decl in self.ns_to_cls_to_func_prop_decls.items():
             imports = [init_import]  # type: List[str]
             ns_cls_blocks = []  # type: List[Block]
@@ -270,16 +340,13 @@ class Pybind11ClassHandler(ManualClass):
                 decl_codes = []  # type: List[Union[Block, str]]
                 for prop_decl in prop_decls:
                     prop_anno = "Any"
+                    prop_type = prop_decl.decl.type_str
                     user_anno = prop_decl.decl.pyanno
-                    if user_anno is None:
-                        if prop_decl.decl.type_str in _AUTO_ANNO_TYPES:
-                            user_anno = _AUTO_ANNO_TYPES[
-                                prop_decl.decl.type_str]
-                    if user_anno is not None:
-                        prop_anno, from_import = self._get_import_and_anno_from_raw(
-                            user_anno)
-                        if from_import is not None:
-                            imports.append(from_import)
+                    anno, from_imports = self._extract_anno_with_cache(
+                        user_anno, prop_type, type_to_anno_cache)
+                    if anno is not None:
+                        prop_anno = anno
+                    imports.extend(from_imports)
                     decl_codes.append("{}: {}".format(prop_decl.decl.name,
                                                       prop_anno))
                 for decl in method_decls:
@@ -294,38 +361,26 @@ class Pybind11ClassHandler(ManualClass):
                     for pydecl in over_decls:
                         res_anno = ""
                         user_anno = pydecl.decl.code.ret_pyanno
-                        if user_anno is None:
-                            if pydecl.decl.code.return_type in _AUTO_ANNO_TYPES:
-                                user_anno = _AUTO_ANNO_TYPES[
-                                    pydecl.decl.code.return_type]
-                        if user_anno is not None:
-                            res_anno, from_import = self._get_import_and_anno_from_raw(
-                                user_anno)
-                            if from_import is not None:
-                                imports.append(from_import)
-                            res_anno = " -> {}".format(res_anno)
-
+                        ret_type = pydecl.decl.code.return_type
+                        anno, from_imports = self._extract_anno_with_cache(
+                            user_anno, ret_type, type_to_anno_cache)
+                        if anno is not None:
+                            res_anno = " -> {}".format(anno)
+                            imports.extend(from_imports)
                         decl_func_name = func_name
                         if isinstance(pydecl.decl.meta, ConstructorMeta):
                             decl_func_name = "__init__"
                         arg_names = []  # type: List[str]
                         for arg in pydecl.decl.code.arguments:
-                            anno = arg.pyanno
                             user_anno = arg.pyanno
-                            if user_anno is None:
-                                if arg.type_str in _AUTO_ANNO_TYPES:
-                                    user_anno = _AUTO_ANNO_TYPES[arg.type_str]
-
+                            user_anno, from_imports = self._extract_anno_with_cache(
+                                user_anno, arg.type_str, type_to_anno_cache)
                             if user_anno is not None:
                                 if user_anno == cls_name:
-                                    anno_str = "\"{}\"".format(user_anno)
-                                else:
-                                    anno_str, from_import = self._get_import_and_anno_from_raw(
-                                        user_anno)
-                                    if from_import is not None:
-                                        imports.append(from_import)
+                                    user_anno = "\"{}\"".format(user_anno)
+                                imports.extend(from_imports)
                                 arg_names.append("{}: {}".format(
-                                    arg.name, anno_str))
+                                    arg.name, user_anno))
                             else:
                                 arg_names.append(arg.name)
                         if not isinstance(
@@ -379,3 +434,9 @@ def pybind_mark(func=None,
         call_guard = "pybind11::gil_scoped_release"
     pybind_meta = Pybind11MethodMeta(ret_policy, call_guard)
     return middleware_decorator(func, pybind_meta)
+
+
+if __name__ == "__main__":
+    # print(ast.parse)
+    print(python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]"))
+    # python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]")
