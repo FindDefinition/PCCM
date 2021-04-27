@@ -478,13 +478,13 @@ class FunctionCode(object):
                 arg_fmt += " = {}".format(arg.default)
             arg_strs.append(arg_fmt)
         arg_str = ", ".join(arg_strs)
-        prefix_fmt = template_fmt + fmt.format(ret_type=return_type,
+        prefix_fmt = fmt.format(ret_type=return_type,
                                                name=name,
                                                args=arg_str,
                                                post_attrs=post_attrs_str)
         if pre_attrs_str:
-            prefix_fmt = template_fmt + pre_attrs_str + " " + prefix_fmt
-        return prefix_fmt
+            prefix_fmt = pre_attrs_str + " " + prefix_fmt
+        return template_fmt + prefix_fmt
 
     def get_impl(self, name: str, meta: FunctionMeta, class_name: str = ""):
         """
@@ -524,15 +524,15 @@ class FunctionCode(object):
                 arg_fmt += " = {}".format(arg.default)
             arg_strs.append(arg_fmt)
         arg_str = ", ".join(arg_strs)
-        prefix_fmt = template_fmt + fmt.format(ret_type=return_type,
+        prefix_fmt = fmt.format(ret_type=return_type,
                                                bound=bound,
                                                name=name,
                                                args=arg_str,
                                                ctor_inits=ctor_inits,
                                                post_attrs=post_attrs_str)
         if pre_attrs_str:
-            prefix_fmt = template_fmt + pre_attrs_str + " " + prefix_fmt
-        block = Block(prefix_fmt, self._blocks, "}")
+            prefix_fmt = pre_attrs_str + " " + prefix_fmt
+        block = Block(template_fmt + prefix_fmt, self._blocks, "}")
         return block
 
     def arg(self,

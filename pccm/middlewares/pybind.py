@@ -67,7 +67,7 @@ def _anno_parser(node: ast.AST, imports: List[str]) -> str:
                                    _anno_parser(node.slice, imports))
         else:
             assert isinstance(node.slice, ast.Index)
-            assert isinstance(node.slice.value, ast.Tuple)
+            assert isinstance(node.slice.value, (ast.Tuple, ast.Attribute, ast.Name, ast.Subscript))
             return "{}[{}]".format(_anno_parser(node.value, imports),
                                    _anno_parser(node.slice.value, imports))
     elif isinstance(node, ast.Tuple):
@@ -82,7 +82,7 @@ def _anno_parser(node: ast.AST, imports: List[str]) -> str:
         return value_parts[-1]
     else:
         msg = "pyanno only support format like name.attr[nested_name.attr[name1, name2], name3]\n"
-        msg += "but we get ast node {}".format(str(type(node)))
+        msg += "but we get ast node {}".format(ast.dump(node))
         raise ValueError(msg)
 
 
@@ -299,6 +299,7 @@ class Pybind11ClassHandler(ManualClass):
         if user_anno is None:
             if type_str in _AUTO_ANNO_TYPES:
                 user_anno = _AUTO_ANNO_TYPES[type_str]
+                return user_anno, from_imports
         if user_anno is None:
             # find anno in cache
             if type_str in type_to_anno_cache:
@@ -306,7 +307,7 @@ class Pybind11ClassHandler(ManualClass):
         anno = None
         if user_anno is not None:
             anno, from_imports = python_anno_parser(user_anno)
-            type_to_anno_cache[type_str] = anno
+            type_to_anno_cache[type_str] = user_anno
         return anno, from_imports
 
     def generate_python_interface(self):
