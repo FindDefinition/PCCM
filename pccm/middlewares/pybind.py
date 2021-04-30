@@ -1,7 +1,7 @@
 import ast
 from collections import OrderedDict
 from enum import Enum
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Set
 
 from ccimport import compat
 
@@ -108,14 +108,23 @@ class ReturnPolicy(Enum):
     Auto = "pybind11::return_value_policy::automatic"
     AutoRef = "pybind11::return_value_policy::automatic_reference"
 
+class MethodType(Enum):
+    PropSetter = "PropSetter"
+    PropGetter = "PropGetter"
+    Normal = "Normal"
+
 
 class Pybind11MethodMeta(Pybind11Meta):
     """may add some attributes in future.
     """
     def __init__(self,
+                 method_type: MethodType = MethodType.Normal,
+                 prop_name: str = "",
                  ret_policy: ReturnPolicy = ReturnPolicy.Auto,
                  call_guard: Optional[str] = None):
         super().__init__(Pybind11)
+        self.method_type = method_type
+        self.prop_name = prop_name 
         self.ret_policy = ret_policy
         self.call_guard = call_guard
 
@@ -134,6 +143,13 @@ class PybindMethodDecl(object):
         self.decl = decl
         self.mw_meta = mw_meta
         self.func_name = decl.meta.name
+        self.method_type = mw_meta.method_type
+        if mw_meta.method_type == MethodType.PropGetter:
+            assert isinstance(decl.meta, MemberFunctionMeta)
+            assert len(decl.code.arguments) == 0, "prop getter can't have argument"
+        if mw_meta.method_type == MethodType.PropSetter:
+            assert isinstance(decl.meta, MemberFunctionMeta)
+            assert len(decl.code.arguments) == 1, "prop setter must have one argument"
         if decl.code.is_template():
             raise ValueError("pybind can't bind template function")
         if isinstance(decl.meta, ConstructorMeta):
@@ -145,6 +161,8 @@ class PybindMethodDecl(object):
                                              class_name, self.func_name)
         else:
             raise NotImplementedError
+
+        self.setter_pybind_decl = None # type: Optional[PybindMethodDecl]
         self.args = []  # type: List[str]
         for argu in decl.code.arguments:
             if argu.default:
@@ -157,21 +175,28 @@ class PybindMethodDecl(object):
         if isinstance(self.decl.meta, ConstructorMeta):
             return ".def({}, {})".format(self.addr, ", ".join(self.args))
         def_stmt = "def"
+        func_name = self.func_name
+
         if isinstance(self.decl.meta, StaticMemberFunctionMeta):
             def_stmt = "def_static"
+        if self.method_type == MethodType.PropGetter:
+            def_stmt = "def_property_readonly"
+            func_name = self.mw_meta.prop_name
         attrs = self.args.copy()
         attrs.append(self.mw_meta.ret_policy.value)
         if self.mw_meta.call_guard is not None:
             attrs.append("pybind11::call_guard<{}>()".format(
                 self.mw_meta.call_guard))
+        if self.setter_pybind_decl is not None:
+            attrs.insert(0, self.setter_pybind_decl.addr)
+            def_stmt = "def_property"
         # if self.decl.meta.mw_metas
         if attrs:
-            return ".{}(\"{}\", {}, {})".format(def_stmt, self.func_name,
+            return ".{}(\"{}\", {}, {})".format(def_stmt, func_name,
                                                 self.addr, ", ".join(attrs))
         else:
-            return ".{}(\"{}\", {})".format(def_stmt, self.func_name,
+            return ".{}(\"{}\", {})".format(def_stmt, func_name,
                                             self.addr)
-
 
 class PybindPropDecl(object):
     def __init__(self, decl: Member, namespace: str, class_name: str,
@@ -184,7 +209,7 @@ class PybindPropDecl(object):
     def to_string(self) -> str:
         def_stmt = "def_readwrite"
         if not self.mw_meta.readwrite:
-            def_stmt = "def_read_only"
+            def_stmt = "def_readonly"
         return ".{}(\"{}\", {})".format(def_stmt, self.decl.name, self.addr)
 
 
@@ -243,6 +268,7 @@ class Pybind11ClassHandler(ManualClass):
             PybindPropDecl(member_decl, cu.namespace, cu.class_name, mw_meta))
 
     def postprocess(self):
+        # TODO find a prop setter for a getter
         if self.built:
             return
         submodules = OrderedDict()  # type: Dict[str, str]
@@ -264,6 +290,24 @@ class Pybind11ClassHandler(ManualClass):
         class_defs = []  # type: List[Block]
         for ns, cls_to_decl in self.ns_to_cls_to_func_prop_decls.items():
             for cls_name, decls in cls_to_decl.items():
+                # for every getters, match a setter if possible.
+                getter_prop_name_to_decl = {} # type: Dict[str, PybindMethodDecl]
+                for decl in decls:
+                    if isinstance(decl, PybindMethodDecl) and decl.method_type == MethodType.PropGetter:
+                        prop_name = decl.mw_meta.prop_name
+                        assert prop_name not in getter_prop_name_to_decl, "duplicate getter {}".format(prop_name)
+                        getter_prop_name_to_decl[decl.mw_meta.prop_name] = decl 
+                setter_prop_name = set() # type: Set[str]
+
+                for decl in decls:
+                    if isinstance(decl, PybindMethodDecl) and decl.method_type == MethodType.PropSetter:
+                        prop_name = decl.mw_meta.prop_name
+                        assert prop_name in getter_prop_name_to_decl
+                        assert prop_name not in setter_prop_name, "duplicate setter {}".format(prop_name)
+                        getter_decl = getter_prop_name_to_decl[prop_name]
+                        setter_prop_name.add(prop_name)
+                        getter_decl.setter_pybind_decl = decl 
+
                 has_constructor = False
                 for d in decls:
                     if isinstance(d, PybindMethodDecl) and isinstance(
@@ -281,6 +325,8 @@ class Pybind11ClassHandler(ManualClass):
                 if not has_constructor:
                     cls_method_defs.append(".def(pybind11::init<>())")
                 for decl in decls:
+                    if isinstance(decl, PybindMethodDecl) and decl.method_type == MethodType.PropSetter:
+                        continue
                     cls_method_defs.append(decl.to_string())
 
                 cls_method_defs[-1] += ";"
@@ -348,6 +394,9 @@ class Pybind11ClassHandler(ManualClass):
                     if anno is not None:
                         prop_anno = anno
                     imports.extend(from_imports)
+                    if prop_anno == cls_name:
+                        prop_anno = "\"{}\"".format(prop_anno)
+
                     decl_codes.append("{}: {}".format(prop_decl.decl.name,
                                                       prop_anno))
                 for decl in method_decls:
@@ -366,11 +415,14 @@ class Pybind11ClassHandler(ManualClass):
                         anno, from_imports = self._extract_anno_with_cache(
                             user_anno, ret_type, type_to_anno_cache)
                         if anno is not None:
+                            if anno == cls_name:
+                                anno = "\"{}\"".format(anno)
                             res_anno = " -> {}".format(anno)
                             imports.extend(from_imports)
                         decl_func_name = func_name
                         if isinstance(pydecl.decl.meta, ConstructorMeta):
                             decl_func_name = "__init__"
+                        
                         arg_names = []  # type: List[str]
                         for arg in pydecl.decl.code.arguments:
                             user_anno = arg.pyanno
@@ -393,6 +445,13 @@ class Pybind11ClassHandler(ManualClass):
                         if isinstance(pydecl.decl.meta,
                                       StaticMemberFunctionMeta):
                             decorator = "@staticmethod\n"
+                        if pydecl.method_type == MethodType.PropGetter:
+                            decorator = "@property\n"
+                            decl_func_name = pydecl.mw_meta.prop_name
+                        elif pydecl.method_type == MethodType.PropSetter:
+                            decorator = "@{}.setter\n".format(pydecl.mw_meta.prop_name)
+                            decl_func_name = pydecl.mw_meta.prop_name
+
                         decl_codes.append(
                             fmt.format(decorator, decl_func_name, py_sig,
                                        res_anno))
@@ -427,15 +486,30 @@ class Pybind11(ManualClassGenerator):
         return self.singleton.generate_python_interface()
 
 
-def pybind_mark(func=None,
+def mark(func=None,
+                prop_name: str = "",
+                method_type : MethodType = MethodType.Normal,
                 ret_policy: ReturnPolicy = ReturnPolicy.Auto,
                 nogil: bool = False):
     call_guard = None  # type: Optional[str]
     if nogil:
         call_guard = "pybind11::gil_scoped_release"
-    pybind_meta = Pybind11MethodMeta(ret_policy, call_guard)
+    pybind_meta = Pybind11MethodMeta(method_type, prop_name, ret_policy, call_guard)
     return middleware_decorator(func, pybind_meta)
 
+def mark_prop_getter(func=None,
+                prop_name: str = "",
+                ret_policy: ReturnPolicy = ReturnPolicy.Auto,
+                nogil: bool = False):
+    return mark(func,prop_name, MethodType.PropGetter, ret_policy, nogil)
+
+def mark_prop_setter(func=None,
+                prop_name: str = "",
+                ret_policy: ReturnPolicy = ReturnPolicy.Auto,
+                nogil: bool = False):
+    return mark(func,prop_name, MethodType.PropSetter, ret_policy, nogil)
+
+pybind_mark = mark
 
 if __name__ == "__main__":
     # print(ast.parse)

@@ -14,7 +14,7 @@ from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 
 _HEADER_ONLY_PRE_ATTRS = set(["static", "virtual"])  # type: Set[str]
-_HEADER_ONLY_POST_ATTRS = set(["final", "override"])  # type: Set[str]
+_HEADER_ONLY_POST_ATTRS = set(["final", "override", "noexcept"])  # type: Set[str]
 
 
 class MiddlewareMeta(object):
@@ -217,7 +217,7 @@ class Argument(object):
                  array: Optional[str] = None,
                  pyanno: Optional[str] = None):
         self.name = name.strip()
-        self.type_str = type.strip()  # type: str
+        self.type_str = str(type).strip()  # type: str
         self.default = default
         self.array = array
         self.pyanno = pyanno

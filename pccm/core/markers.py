@@ -6,8 +6,6 @@ from pccm.core import (ConstructorMeta, DestructorMeta, ExternalFunctionMeta,
                        StaticMemberFunctionMeta)
 
 PYTHON_OPERATORS_TO_CPP = {
-    "__call__": "operator()",
-    "__getitem__": "operator[]",
 }
 
 

@@ -11,8 +11,9 @@ class Test3(pccm.Class):
                         "int",
                         pyanno="int",
                         mw_metas=[pccm.pybind.Pybind11PropMeta()])
+        self.add_member("private_prop_", "int", "0")
 
-    @pccm.pybind.pybind_mark
+    @pccm.pybind.mark
     @pccm.member_function(inline=True)
     def add(self):
         code = pccm.FunctionCode("")
@@ -26,13 +27,27 @@ class Test3(pccm.Class):
         """).arg("a,b", "int").ret("int")
         return code
 
+    @pccm.pybind.mark_prop_getter(prop_name="square_prop")
+    @pccm.member_function
+    def prop_getter(self):
+        code = pccm.FunctionCode("return private_prop_ * private_prop_;")
+        return code.ret("int") 
+
+
+    @pccm.pybind.mark_prop_setter(prop_name="square_prop")
+    @pccm.member_function
+    def prop_setter(self):
+        code = pccm.FunctionCode("private_prop_ = val;")
+        code.arg("val", "int")
+        return code 
+
 
 class Test4(Test3):
     def __init__(self):
         super().__init__()
         self.set_this_class_type(__class__)
 
-    @pccm.pybind.pybind_mark(nogil=True)
+    @pccm.pybind.mark(nogil=True)
     @pccm.member_function(inline=True)
     def add2(self):
         code = pccm.FunctionCode("")
@@ -41,7 +56,7 @@ class Test4(Test3):
         """).arg("a,b", "int").ret("int")
         return code
 
-    @pccm.pybind.pybind_mark
+    @pccm.pybind.mark
     @pccm.static_function
     def add_static(self):
         code = pccm.FunctionCode("")
