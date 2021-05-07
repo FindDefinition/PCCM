@@ -8,7 +8,7 @@ from ccimport import compat
 from pccm.core import (Class, ConstructorMeta, ExternalFunctionMeta,
                        FunctionDecl, ManualClass, ManualClassGenerator, Member,
                        MemberFunctionMeta, MiddlewareMeta,
-                       StaticMemberFunctionMeta)
+                       StaticMemberFunctionMeta, CodeSectionClassDef)
 from pccm.core.buildmeta import _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 from pccm.core.markers import middleware_decorator
@@ -67,7 +67,9 @@ def _anno_parser(node: ast.AST, imports: List[str]) -> str:
                                    _anno_parser(node.slice, imports))
         else:
             assert isinstance(node.slice, ast.Index)
-            assert isinstance(node.slice.value, (ast.Tuple, ast.Attribute, ast.Name, ast.Subscript))
+            assert isinstance(
+                node.slice.value,
+                (ast.Tuple, ast.Attribute, ast.Name, ast.Subscript))
             return "{}[{}]".format(_anno_parser(node.value, imports),
                                    _anno_parser(node.slice.value, imports))
     elif isinstance(node, ast.Tuple):
@@ -108,6 +110,7 @@ class ReturnPolicy(Enum):
     Auto = "pybind11::return_value_policy::automatic"
     AutoRef = "pybind11::return_value_policy::automatic_reference"
 
+
 class MethodType(Enum):
     PropSetter = "PropSetter"
     PropGetter = "PropGetter"
@@ -118,15 +121,19 @@ class Pybind11MethodMeta(Pybind11Meta):
     """may add some attributes in future.
     """
     def __init__(self,
+                 bind_name: str = "",
                  method_type: MethodType = MethodType.Normal,
                  prop_name: str = "",
                  ret_policy: ReturnPolicy = ReturnPolicy.Auto,
-                 call_guard: Optional[str] = None):
+                 call_guard: Optional[str] = None,
+                 virtual: bool = False):
         super().__init__(Pybind11)
+        self.bind_name = bind_name
         self.method_type = method_type
-        self.prop_name = prop_name 
+        self.prop_name = prop_name
         self.ret_policy = ret_policy
         self.call_guard = call_guard
+        self.virtual = virtual
 
 
 class Pybind11PropMeta(Pybind11Meta):
@@ -142,14 +149,23 @@ class PybindMethodDecl(object):
                  mw_meta: Pybind11MethodMeta):
         self.decl = decl
         self.mw_meta = mw_meta
-        self.func_name = decl.meta.name
+        if mw_meta.bind_name:
+            self.func_name = mw_meta.bind_name
+        else:
+            self.func_name = decl.meta.name
         self.method_type = mw_meta.method_type
+        member_meta = decl.meta
+        if mw_meta.virtual:
+            assert member_meta.virtual is True, "you must mark func as virtual member first."
+
         if mw_meta.method_type == MethodType.PropGetter:
             assert isinstance(decl.meta, MemberFunctionMeta)
-            assert len(decl.code.arguments) == 0, "prop getter can't have argument"
+            assert len(
+                decl.code.arguments) == 0, "prop getter can't have argument"
         if mw_meta.method_type == MethodType.PropSetter:
             assert isinstance(decl.meta, MemberFunctionMeta)
-            assert len(decl.code.arguments) == 1, "prop setter must have one argument"
+            assert len(
+                decl.code.arguments) == 1, "prop setter must have one argument"
         if decl.code.is_template():
             raise ValueError("pybind can't bind template function")
         if isinstance(decl.meta, ConstructorMeta):
@@ -162,7 +178,7 @@ class PybindMethodDecl(object):
         else:
             raise NotImplementedError
 
-        self.setter_pybind_decl = None # type: Optional[PybindMethodDecl]
+        self.setter_pybind_decl = None  # type: Optional[PybindMethodDecl]
         self.args = []  # type: List[str]
         for argu in decl.code.arguments:
             if argu.default:
@@ -192,11 +208,28 @@ class PybindMethodDecl(object):
             def_stmt = "def_property"
         # if self.decl.meta.mw_metas
         if attrs:
-            return ".{}(\"{}\", {}, {})".format(def_stmt, func_name,
-                                                self.addr, ", ".join(attrs))
+            return ".{}(\"{}\", {}, {})".format(def_stmt, func_name, self.addr,
+                                                ", ".join(attrs))
         else:
-            return ".{}(\"{}\", {})".format(def_stmt, func_name,
-                                            self.addr)
+            return ".{}(\"{}\", {})".format(def_stmt, func_name, self.addr)
+
+    def get_virtual_string(self, parent_cls_name: str):
+        fmt = "{} {} {{PYBIND11_OVERRIDE({}, {}, {}, {});}}"
+        if self.decl.meta.pure_virtual:
+            fmt = "{} {} {{PYBIND11_OVERRIDE_PURE({}, {}, {}, {});}}"
+        post_meta_attrs = self.decl.meta.get_post_attrs()
+        override = ""
+        if "override" not in post_meta_attrs:
+            override = "override"
+        sig_str = self.decl.code.get_sig(self.decl.meta.name,
+                                         self.decl.meta,
+                                         withpost=True,
+                                         with_semicolon=False,
+                                         with_pure=False)
+        arg_names = ", ".join(a.name for a in self.decl.code.arguments)
+        return fmt.format(sig_str, override, self.decl.code.return_type,
+                          parent_cls_name, self.func_name, arg_names)
+
 
 class PybindPropDecl(object):
     def __init__(self, decl: Member, namespace: str, class_name: str,
@@ -288,25 +321,64 @@ class Pybind11ClassHandler(ManualClass):
                     sub_defs.append(stmt)
                     submodules[sub_ns] = "m_{}".format(sub_name)
         class_defs = []  # type: List[Block]
+        virtual_class_defs = []  # type: List[Block]
         for ns, cls_to_decl in self.ns_to_cls_to_func_prop_decls.items():
             for cls_name, decls in cls_to_decl.items():
-                # for every getters, match a setter if possible.
-                getter_prop_name_to_decl = {} # type: Dict[str, PybindMethodDecl]
+                # find virtual pybind functions.
+                has_virtual = False
+                virtual_decls = []  # type: List[PybindMethodDecl]
                 for decl in decls:
-                    if isinstance(decl, PybindMethodDecl) and decl.method_type == MethodType.PropGetter:
+                    if isinstance(decl,
+                                  PybindMethodDecl) and decl.mw_meta.virtual:
+                        has_virtual = True
+                        virtual_decls.append(decl)
+                virtual_cls_name = "Py" + cls_name
+                if has_virtual:
+                    virtual_cls_def = CodeSectionClassDef(
+                        virtual_cls_name,
+                        dep_alias=[],
+                        code_before=[],
+                        code_after=[],
+                        external_funcs=[],
+                        typedefs=["using {}::{};".format(cls_name, cls_name)],
+                        static_consts=[],
+                        functions=[
+                            d.get_virtual_string(cls_name)
+                            for d in virtual_decls
+                        ],
+                        members=[],
+                        parent_class=cls_name)
+                    ns_before, ns_after = virtual_cls_def.generate_namespace(
+                        ns)
+                    block = Block("\n".join(ns_before),
+                                  [virtual_cls_def.to_block()],
+                                  "\n".join(ns_after),
+                                  indent=0)
+                    virtual_class_defs.append(block)
+                # for every getters, match a setter if possible.
+                getter_prop_name_to_decl = {
+                }  # type: Dict[str, PybindMethodDecl]
+                for decl in decls:
+                    if isinstance(
+                            decl, PybindMethodDecl
+                    ) and decl.method_type == MethodType.PropGetter:
                         prop_name = decl.mw_meta.prop_name
-                        assert prop_name not in getter_prop_name_to_decl, "duplicate getter {}".format(prop_name)
-                        getter_prop_name_to_decl[decl.mw_meta.prop_name] = decl 
-                setter_prop_name = set() # type: Set[str]
+                        assert prop_name not in getter_prop_name_to_decl, "duplicate getter {}".format(
+                            prop_name)
+                        getter_prop_name_to_decl[decl.mw_meta.prop_name] = decl
+                setter_prop_name = set()  # type: Set[str]
 
                 for decl in decls:
-                    if isinstance(decl, PybindMethodDecl) and decl.method_type == MethodType.PropSetter:
+                    if isinstance(
+                            decl, PybindMethodDecl
+                    ) and decl.method_type == MethodType.PropSetter:
                         prop_name = decl.mw_meta.prop_name
                         assert prop_name in getter_prop_name_to_decl
-                        assert prop_name not in setter_prop_name, "duplicate setter {}".format(prop_name)
+                        assert prop_name not in setter_prop_name, "duplicate setter {}".format(
+                            prop_name)
                         getter_decl = getter_prop_name_to_decl[prop_name]
                         setter_prop_name.add(prop_name)
-                        getter_decl.setter_pybind_decl = decl 
+                        getter_decl.setter_pybind_decl = decl
 
                 has_constructor = False
                 for d in decls:
@@ -316,16 +388,23 @@ class Pybind11ClassHandler(ManualClass):
                         break
                 cls_qual_name = "{}::{}".format(ns.replace(".", "::"),
                                                 cls_name)
+                cls_def_arguments = [cls_qual_name]
+                if has_virtual:
+                    cls_def_arguments.append("{}::{}".format(
+                        ns.replace(".", "::"), virtual_cls_name))
+                cls_def_argu_str = ", ".join(cls_def_arguments)
                 submod = submodules[ns]
-                cls_def = "pybind11::class_<{cls_qual_name}>({submod}, \"{cls_name}\")".format(
-                    cls_qual_name=cls_qual_name,
+                cls_def = "pybind11::class_<{cls_def_argu_str}>({submod}, \"{cls_name}\")".format(
+                    cls_def_argu_str=cls_def_argu_str,
                     submod=submod,
                     cls_name=cls_name)
                 cls_method_defs = []  # type: List[str]
                 if not has_constructor:
                     cls_method_defs.append(".def(pybind11::init<>())")
                 for decl in decls:
-                    if isinstance(decl, PybindMethodDecl) and decl.method_type == MethodType.PropSetter:
+                    if isinstance(
+                            decl, PybindMethodDecl
+                    ) and decl.method_type == MethodType.PropSetter:
                         continue
                     cls_method_defs.append(decl.to_string())
 
@@ -334,7 +413,7 @@ class Pybind11ClassHandler(ManualClass):
                 class_defs.append(cls_def_block)
         code_block = Block("PYBIND11_MODULE({}, m){{".format(self.module_name),
                            sub_defs + class_defs, "}")
-        code = generate_code(code_block, 0, 2)
+        code = generate_code_list([*virtual_class_defs, code_block], 0, 2)
         self.add_impl_main("{}_pybind_main".format(self.module_name),
                            "\n".join(code), self.file_suffix)
         self.built = True
@@ -422,7 +501,7 @@ class Pybind11ClassHandler(ManualClass):
                         decl_func_name = func_name
                         if isinstance(pydecl.decl.meta, ConstructorMeta):
                             decl_func_name = "__init__"
-                        
+
                         arg_names = []  # type: List[str]
                         for arg in pydecl.decl.code.arguments:
                             user_anno = arg.pyanno
@@ -449,7 +528,8 @@ class Pybind11ClassHandler(ManualClass):
                             decorator = "@property\n"
                             decl_func_name = pydecl.mw_meta.prop_name
                         elif pydecl.method_type == MethodType.PropSetter:
-                            decorator = "@{}.setter\n".format(pydecl.mw_meta.prop_name)
+                            decorator = "@{}.setter\n".format(
+                                pydecl.mw_meta.prop_name)
                             decl_func_name = pydecl.mw_meta.prop_name
 
                         decl_codes.append(
@@ -487,27 +567,45 @@ class Pybind11(ManualClassGenerator):
 
 
 def mark(func=None,
-                prop_name: str = "",
-                method_type : MethodType = MethodType.Normal,
-                ret_policy: ReturnPolicy = ReturnPolicy.Auto,
-                nogil: bool = False):
+         bind_name: str = "",
+         prop_name: str = "",
+         method_type: MethodType = MethodType.Normal,
+         ret_policy: ReturnPolicy = ReturnPolicy.Auto,
+         virtual: bool = False,
+         nogil: bool = False):
+    if virtual:
+        assert not nogil, "you can't release gil for python virtual function."
     call_guard = None  # type: Optional[str]
     if nogil:
         call_guard = "pybind11::gil_scoped_release"
-    pybind_meta = Pybind11MethodMeta(method_type, prop_name, ret_policy, call_guard)
+    pybind_meta = Pybind11MethodMeta(bind_name, method_type, prop_name,
+                                     ret_policy, call_guard, virtual)
     return middleware_decorator(func, pybind_meta)
 
+
 def mark_prop_getter(func=None,
-                prop_name: str = "",
-                ret_policy: ReturnPolicy = ReturnPolicy.Auto,
-                nogil: bool = False):
-    return mark(func,prop_name, MethodType.PropGetter, ret_policy, nogil)
+                     prop_name: str = "",
+                     ret_policy: ReturnPolicy = ReturnPolicy.Auto,
+                     nogil: bool = False):
+    return mark(func,
+                "",
+                prop_name,
+                MethodType.PropGetter,
+                ret_policy,
+                nogil=nogil)
+
 
 def mark_prop_setter(func=None,
-                prop_name: str = "",
-                ret_policy: ReturnPolicy = ReturnPolicy.Auto,
-                nogil: bool = False):
-    return mark(func,prop_name, MethodType.PropSetter, ret_policy, nogil)
+                     prop_name: str = "",
+                     ret_policy: ReturnPolicy = ReturnPolicy.Auto,
+                     nogil: bool = False):
+    return mark(func,
+                "",
+                prop_name,
+                MethodType.PropSetter,
+                ret_policy,
+                nogil=nogil)
+
 
 pybind_mark = mark
 

@@ -9,12 +9,13 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 from ccimport import compat, loader
 
-from pccm.constants import PCCM_FUNC_META_KEY, PCCM_MAGIC_STRING
+from pccm.constants import PCCM_FUNC_META_KEY, PCCM_MAGIC_STRING, PCCM_INIT_DECORATOR_KEY
 from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 
 _HEADER_ONLY_PRE_ATTRS = set(["static", "virtual"])  # type: Set[str]
-_HEADER_ONLY_POST_ATTRS = set(["final", "override", "noexcept"])  # type: Set[str]
+_HEADER_ONLY_POST_ATTRS = set(["final", "override",
+                               "noexcept"])  # type: Set[str]
 
 
 class MiddlewareMeta(object):
@@ -26,6 +27,8 @@ class FunctionMeta(object):
     def __init__(self,
                  inline: bool = False,
                  constexpr: bool = False,
+                 virtual: bool = False,
+                 pure_virtual: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
                  impl_loc: str = "",
@@ -43,6 +46,8 @@ class FunctionMeta(object):
         self.impl_loc = impl_loc
         self.impl_file_suffix = impl_file_suffix
         self.mw_metas = []  # type: List[MiddlewareMeta]
+        self.virtual = virtual
+        self.pure_virtual = pure_virtual
 
     def get_pre_attrs(self) -> List[str]:
         res = self.attrs.copy()  # type: List[str]
@@ -56,7 +61,7 @@ class FunctionMeta(object):
         return []
 
     def is_header_only(self):
-        return self.inline or self.constexpr
+        return self.inline or self.constexpr or self.pure_virtual
 
 
 def get_func_meta_except(func) -> FunctionMeta:
@@ -95,6 +100,7 @@ class DestructorMeta(FunctionMeta):
                  inline: bool = False,
                  constexpr: bool = False,
                  virtual: bool = True,
+                 pure_virtual: bool = False,
                  override: bool = False,
                  final: bool = False,
                  attrs: Optional[List[str]] = None,
@@ -104,10 +110,11 @@ class DestructorMeta(FunctionMeta):
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
+                         virtual=virtual,
+                         pure_virtual=pure_virtual,
                          name=name,
                          impl_loc=impl_loc,
                          impl_file_suffix=impl_file_suffix)
-        self.virtual = virtual
         self.override = override
         self.final = final
         if override or final:
@@ -133,6 +140,7 @@ class MemberFunctionMeta(FunctionMeta):
                  inline: bool = False,
                  constexpr: bool = False,
                  virtual: bool = True,
+                 pure_virtual: bool = False,
                  override: bool = False,
                  final: bool = False,
                  const: bool = False,
@@ -142,11 +150,12 @@ class MemberFunctionMeta(FunctionMeta):
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
                          constexpr=constexpr,
+                         virtual=virtual,
+                         pure_virtual=pure_virtual,
                          attrs=attrs,
                          name=name,
                          impl_loc=impl_loc,
                          impl_file_suffix=impl_file_suffix)
-        self.virtual = virtual
         self.override = override
         self.final = final
         if override or final:
@@ -448,7 +457,12 @@ class FunctionCode(object):
                 res_attrs.append(attr)
         return res_attrs
 
-    def get_sig(self, name: str, meta: FunctionMeta) -> str:
+    def get_sig(self,
+                name: str,
+                meta: FunctionMeta,
+                withpost: bool = True,
+                with_semicolon: bool = True,
+                with_pure: bool = True) -> str:
         """
         template <args>
         pre_attrs ret_type name(args) post_attrs;
@@ -462,8 +476,13 @@ class FunctionCode(object):
         else:
             if not header_only:
                 assert self.return_type != "auto" and self.return_type != "decltype(auto)"
-
-        fmt = "{ret_type} {name}({args}) {post_attrs};"
+        fmt = "{ret_type} {name}({args})"
+        if withpost:
+            fmt += "{post_attrs}"
+        if with_pure and meta.pure_virtual:
+            fmt += " = 0"
+        if with_semicolon:
+            fmt += ";"
         template_fmt = ""
         if self.is_template():
             temp_arg_str = ", ".join(t.to_string()
@@ -479,9 +498,9 @@ class FunctionCode(object):
             arg_strs.append(arg_fmt)
         arg_str = ", ".join(arg_strs)
         prefix_fmt = fmt.format(ret_type=return_type,
-                                               name=name,
-                                               args=arg_str,
-                                               post_attrs=post_attrs_str)
+                                name=name,
+                                args=arg_str,
+                                post_attrs=post_attrs_str)
         if pre_attrs_str:
             prefix_fmt = pre_attrs_str + " " + prefix_fmt
         return template_fmt + prefix_fmt
@@ -525,11 +544,11 @@ class FunctionCode(object):
             arg_strs.append(arg_fmt)
         arg_str = ", ".join(arg_strs)
         prefix_fmt = fmt.format(ret_type=return_type,
-                                               bound=bound,
-                                               name=name,
-                                               args=arg_str,
-                                               ctor_inits=ctor_inits,
-                                               post_attrs=post_attrs_str)
+                                bound=bound,
+                                name=name,
+                                args=arg_str,
+                                ctor_inits=ctor_inits,
+                                post_attrs=post_attrs_str)
         if pre_attrs_str:
             prefix_fmt = pre_attrs_str + " " + prefix_fmt
         block = Block(template_fmt + prefix_fmt, self._blocks, "}")
@@ -599,6 +618,17 @@ class FunctionDecl(object):
         self.meta = meta
         self.code = code
 
+def _init_decorator(func, cls):
+    def wrapper(self, *args, **kwargs):
+        backup = None 
+        if hasattr(self, PCCM_INIT_DECORATOR_KEY):
+            backup = getattr(self, PCCM_INIT_DECORATOR_KEY)
+        setattr(self, PCCM_INIT_DECORATOR_KEY, cls)
+        func(self, *args, **kwargs)
+        if backup is not None:
+            setattr(self, PCCM_INIT_DECORATOR_KEY, backup)
+    return wrapper
+
 
 class Class(object):
     """
@@ -611,48 +641,106 @@ class Class(object):
 
     TODO handle inherited codes
     """
+
+    def __init_subclass__(cls) -> None:
+        """make c++ meta adding code know which class call 
+        them. for example, if we have a class A and a subclass
+        B, we need to remove members added in A.__init__ to construct
+        correct c++ class.
+        only works in python 3.6+, so we don't support inherit
+        in python 3.5.
+        """
+        cls.__init__ = _init_decorator(cls.__init__, cls)
+        return super().__init_subclass__()
+
+    def __get_this_type(self):
+        """get current Class Type during c++ constructing functions
+        like add_member.
+        """
+        return getattr(self, PCCM_INIT_DECORATOR_KEY, None)
+
     def __init__(self):
         self._this_cls_type = None  # type: Optional[Type[Class]]
+
         self._members = []  # type: List[Member]
-        if compat.Python3_7AndLater:
-            self._param_class = {}  # type: Dict[str, ParameterizedClass]
-            self._param_class_alias = {}  # type: Dict[str, str]
-        else:
-            self._param_class = OrderedDict(
-            )  # type: OrderedDict[str, ParameterizedClass]
-            self._param_class_alias = OrderedDict(
-            )  # type: OrderedDict[str, str]
+        self._this_type_to_members = {
+            self._this_cls_type: []
+        }  # type: Dict[Optional[Type[Class]], List[Member]]
+
+        self._param_class = OrderedDict(
+        )  # type: OrderedDict[str, ParameterizedClass]
+
+        self._this_type_to_param_class = {
+            self._this_cls_type: OrderedDict()
+        }  # type: Dict[Optional[Type[Class]], Dict[str, ParameterizedClass]]
+
+        self._param_class_alias = OrderedDict()  # type: OrderedDict[str, str]
+
+        self._this_type_to_param_class_alias = {
+            self._this_cls_type: OrderedDict()
+        }  # type: Dict[Optional[Type[Class]], Dict[str, str]]
+
 
         self._typedefs = []  # type: List[Typedef]
+
+        self._this_type_to_typedefs = {
+            self._this_cls_type: []
+        }  # type: Dict[Optional[Type[Class]], List[Typedef]]
+
+
         self._static_consts = []  # type: List[StaticConst]
+
+        self._this_type_to_static_consts = {
+            self._this_cls_type: []
+        }  # type: Dict[Optional[Type[Class]], List[StaticConst]]
+
         self._code_before_class = []  # type: List[str]
         self._code_after_class = []  # type: List[str]
+
+        self._this_type_to_code_before_class = {
+            self._this_cls_type: []
+        }  # type: Dict[Optional[Type[Class]], List[str]]
+        self._this_type_to_code_after_class = {
+            self._this_cls_type: []
+        }  # type: Dict[Optional[Type[Class]], List[str]]
+
         self._includes = []  # type: List[str]
+        self._this_type_to_includes = {
+            self._this_cls_type: []
+        }  # type: Dict[Optional[Type[Class]], List[str]]
+
+
         # TODO we can't use set here because we need to keep order of deps
         self._deps = []  # type: List[Type[Class]]
+
+        self._this_type_to_deps = {
+            self._this_cls_type: []
+        }  # type: Dict[Optional[Type[Class]], Type[Class]]
+
         self._impl_mains = OrderedDict(
         )  # type: Dict[str, Tuple[str, List[str]]]
         self._global_codes = []  # type: List[str]
+        self._impl_only_cls_dep = OrderedDict(
+        )  # type: OrderedDict[Callable, List[Type[Class]]]
+        self._impl_only_param_cls_dep = OrderedDict(
+        )  # type: OrderedDict[Callable, List[ParameterizedClass]]
+        self._build_meta = BuildMeta()
+
         # filled during graph building
         self._graph_inited = False  # type: bool
         self._unified_deps = []  # type: List[Class]
         self._function_decls = []  # type: List[FunctionDecl]
         self._namespace = None  # type: Optional[str]
-        if compat.Python3_7AndLater:
-            self._impl_only_cls_dep = {
-            }  # type: Dict[Callable, List[Type[Class]]]
-            self._impl_only_param_cls_dep = {
-            }  # type: Dict[Callable, List[ParameterizedClass]]
-        else:
-            self._impl_only_cls_dep = OrderedDict(
-            )  # type: OrderedDict[Callable, List[Type[Class]]]
-            self._impl_only_param_cls_dep = OrderedDict(
-            )  # type: OrderedDict[Callable, List[ParameterizedClass]]
-
-        self._build_meta = BuildMeta()
+        self._parent_class_checked = False # type: bool
 
     def set_this_class_type(self, this_cls_type: Type["Class"]):
         self._this_cls_type = this_cls_type
+
+    def _check_this_class(self):
+        # make sure user call self.set_this_class_type(__class__)
+        if not self._parent_class_checked:
+            self.get_parent_class()
+            self._parent_class_checked = True 
 
     @property
     def build_meta(self) -> BuildMeta:
@@ -816,7 +904,7 @@ class Class(object):
         if pccm_base is not Class and base is not ParameterizedClass:
             # assert not issubclass(mro[1], ParameterizedClass), "you can't inherit a param class."
             if not issubclass(pccm_base, ParameterizedClass):
-                # you inherit a class. you must set _this_cls_type by super().__init__(__class__)
+                # you inherit a class. you must set _this_cls_type by self.set_this_class_type(__class__)
                 msg = (
                     "you must use self.set_this_class_type(__class__) to init this class type"
                     " when you inherit pccm.Class")

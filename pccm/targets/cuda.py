@@ -6,22 +6,22 @@ from pccm.core import (ConstructorMeta, DestructorMeta, ExternalFunctionMeta,
 
 class CudaMemberFunctionMeta(MemberFunctionMeta):
     def is_header_only(self):
-        return self.inline or "__forceinline__" in self.attrs
+        return super().is_header_only() or "__forceinline__" in self.attrs
 
 
 class CudaStaticMemberFunctionMeta(StaticMemberFunctionMeta):
     def is_header_only(self):
-        return self.inline or "__forceinline__" in self.attrs
+        return super().is_header_only() or "__forceinline__" in self.attrs
 
 
 class CudaConstructorMeta(ConstructorMeta):
     def is_header_only(self):
-        return self.inline or "__forceinline__" in self.attrs
+        return super().is_header_only() or "__forceinline__" in self.attrs
 
 
 class CudaDestructorMeta(DestructorMeta):
     def is_header_only(self):
-        return self.inline or "__forceinline__" in self.attrs
+        return super().is_header_only() or "__forceinline__" in self.attrs
 
 
 class CudaExternalFunctionMeta(ExternalFunctionMeta):

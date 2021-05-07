@@ -64,3 +64,18 @@ class Test4(Test3):
         return a + b;
         """).arg("a,b", "int").ret("int")
         return code
+
+class PbTestVirtual(pccm.Class):
+    @pccm.pybind.mark(virtual=True)
+    @pccm.member_function(virtual=True)
+    def func_0(self):
+        return pccm.FunctionCode("return 0;").ret("int")
+
+    @pccm.pybind.mark(virtual=True)
+    @pccm.member_function(virtual=True)
+    def func_2(self):
+        code = pccm.FunctionCode("return 0;").ret("int")
+        code.arg("a, b", "int")
+        return code
+
+
