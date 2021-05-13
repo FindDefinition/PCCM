@@ -65,17 +65,34 @@ class Test4(Test3):
         """).arg("a,b", "int").ret("int")
         return code
 
-class PbTestVirtual(pccm.Class):
+class PbTestVirtual(pccm.Class, pccm.pybind.PybindClassMixin):
+    def __init__(self):
+        super().__init__()
+        self.add_pybind_member("a", "int", "0")
+
     @pccm.pybind.mark(virtual=True)
     @pccm.member_function(virtual=True)
     def func_0(self):
         return pccm.FunctionCode("return 0;").ret("int")
 
     @pccm.pybind.mark(virtual=True)
-    @pccm.member_function(virtual=True)
+    @pccm.member_function(virtual=True, pure_virtual=True)
     def func_2(self):
-        code = pccm.FunctionCode("return 0;").ret("int")
+        code = pccm.FunctionCode("").ret("int")
         code.arg("a, b", "int")
+        return code
+
+    @pccm.pybind.mark
+    @pccm.member_function
+    def run_virtual_func_0(self):
+        code = pccm.FunctionCode("return func_0();").ret("int")
+        return code
+
+    @pccm.pybind.mark
+    @pccm.member_function
+    def run_pure_virtual_func_2(self):
+        code = pccm.FunctionCode("return func_2(a, b);").ret("int")
+        code.arg("a,b", "int")
         return code
 
 

@@ -522,6 +522,8 @@ class FunctionCode(object):
         template <args>
         pre_attrs ret_type BoundClass::name(args) post_attrs {body};
         """
+        if meta.pure_virtual:
+            return self.get_sig(name, meta)
         header_only = meta.is_header_only() or self.is_template()
         pre_attrs = _unique_list_keep_order(meta.get_pre_attrs())
         post_attrs = _unique_list_keep_order(meta.get_post_attrs())

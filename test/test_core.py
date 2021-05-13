@@ -16,6 +16,21 @@ def test_core():
     t3.square_prop = 5
     assert t3.square_prop == 25
 
+    class VirtualClass(lib.pccm.test_data.mod.PbTestVirtual):
+        def func_0(self):
+            self.a = 42
+            return 0
+        def func_2(self, a: int, b: int):
+            self.a = a + b
+            return 0
+
+    vobj = VirtualClass()
+    assert vobj.a == 0
+    vobj.run_virtual_func_0()
+    assert vobj.a == 42
+    vobj.run_pure_virtual_func_2(3, 4)
+    assert vobj.a == 7
+
 
 if __name__ == "__main__":
     test_core()
