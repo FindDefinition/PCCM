@@ -48,9 +48,12 @@ def build_pybind(cus: List[Class],
     pb = pybind.Pybind11(mod_name, mod_name, pybind_file_suffix)
     cg = CodeGenerator([pb], verbose=verbose)
     cg.build_graph(cus, namespace_root)
-    header_dict, impl_dict = cg.code_generation(cg.get_code_units())
+    header_dict, impl_dict, header_to_impls = cg.code_generation(cg.get_code_units())
     HEADER_ROOT = build_dir / "include"
     SRC_ROOT = build_dir / "src"
+    pch_to_sources = {} # type: Dict[Path, List[Path]]
+    for header, impls in header_to_impls.items():
+        pch_to_sources[HEADER_ROOT / header] = [SRC_ROOT / p for p in impls]
     includes.append(HEADER_ROOT)
     extern_build_meta = BuildMeta(includes, libpaths, libraries,
                                   additional_cflags, additional_lflags)
@@ -58,7 +61,7 @@ def build_pybind(cus: List[Class],
         extern_build_meta += cu.build_meta
     cg.code_written(HEADER_ROOT, header_dict, code_fmt)
     paths = cg.code_written(SRC_ROOT, impl_dict, code_fmt)
-    header_dict, impl_dict = cg.code_generation(pb.get_code_units())
+    header_dict, impl_dict, header_to_impls = cg.code_generation(pb.get_code_units())
     cg.code_written(HEADER_ROOT, header_dict, code_fmt)
     paths += cg.code_written(SRC_ROOT, impl_dict, code_fmt)
     pyi = pb.generate_python_interface()
@@ -80,7 +83,6 @@ def build_pybind(cus: List[Class],
             mk_init = mk_init / part
         with pyi_path.open("w") as f:
             f.write(v)
-
     return ccimport.ccimport(
         paths,
         out_path,
@@ -98,4 +100,5 @@ def build_pybind(cus: List[Class],
         msvc_deps_prefix=msvc_deps_prefix,
         build_dir=build_dir,
         out_root=out_root,
+        pch_to_sources=pch_to_sources,
         verbose=verbose)

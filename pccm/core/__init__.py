@@ -31,6 +31,7 @@ class FunctionMeta(object):
                  pure_virtual: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
+                 macro_guard: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         self.name = name
@@ -48,6 +49,7 @@ class FunctionMeta(object):
         self.mw_metas = []  # type: List[MiddlewareMeta]
         self.virtual = virtual
         self.pure_virtual = pure_virtual
+        self.macro_guard = macro_guard
 
     def get_pre_attrs(self) -> List[str]:
         res = self.attrs.copy()  # type: List[str]
@@ -78,12 +80,14 @@ class ConstructorMeta(FunctionMeta):
                  explicit: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
+                 macro_guard: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
                          name=name,
+                         macro_guard=macro_guard,
                          impl_loc=impl_loc,
                          impl_file_suffix=impl_file_suffix)
         self.explicit = explicit
@@ -105,6 +109,7 @@ class DestructorMeta(FunctionMeta):
                  final: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
+                 macro_guard: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
@@ -113,6 +118,7 @@ class DestructorMeta(FunctionMeta):
                          virtual=virtual,
                          pure_virtual=pure_virtual,
                          name=name,
+                         macro_guard=macro_guard,
                          impl_loc=impl_loc,
                          impl_file_suffix=impl_file_suffix)
         self.override = override
@@ -146,6 +152,7 @@ class MemberFunctionMeta(FunctionMeta):
                  const: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
+                 macro_guard: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
@@ -154,6 +161,7 @@ class MemberFunctionMeta(FunctionMeta):
                          pure_virtual=pure_virtual,
                          attrs=attrs,
                          name=name,
+                         macro_guard=macro_guard,
                          impl_loc=impl_loc,
                          impl_file_suffix=impl_file_suffix)
         self.override = override
@@ -185,12 +193,14 @@ class StaticMemberFunctionMeta(FunctionMeta):
                  constexpr: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
+                 macro_guard: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
                          name=name,
+                         macro_guard=macro_guard,
                          impl_loc=impl_loc,
                          impl_file_suffix=impl_file_suffix)
 
@@ -208,12 +218,14 @@ class ExternalFunctionMeta(FunctionMeta):
                  constexpr: bool = False,
                  attrs: Optional[List[str]] = None,
                  name: Optional[str] = None,
+                 macro_guard: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc"):
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
                          name=name,
+                         macro_guard=macro_guard,
                          impl_loc=impl_loc,
                          impl_file_suffix=impl_file_suffix)
 
@@ -618,15 +630,17 @@ class FunctionDecl(object):
         self.meta = meta
         self.code = code
 
+
 def _init_decorator(func, cls):
     def wrapper(self, *args, **kwargs):
-        backup = None 
+        backup = None
         if hasattr(self, PCCM_INIT_DECORATOR_KEY):
             backup = getattr(self, PCCM_INIT_DECORATOR_KEY)
         setattr(self, PCCM_INIT_DECORATOR_KEY, cls)
         func(self, *args, **kwargs)
         if backup is not None:
             setattr(self, PCCM_INIT_DECORATOR_KEY, backup)
+
     return wrapper
 
 
@@ -641,7 +655,6 @@ class Class(object):
 
     TODO handle inherited codes
     """
-
     def __init_subclass__(cls) -> None:
         """make c++ meta adding code know which class call 
         them. for example, if we have a class A and a subclass
@@ -680,13 +693,11 @@ class Class(object):
             self._this_cls_type: OrderedDict()
         }  # type: Dict[Optional[Type[Class]], Dict[str, str]]
 
-
         self._typedefs = []  # type: List[Typedef]
 
         self._this_type_to_typedefs = {
             self._this_cls_type: []
         }  # type: Dict[Optional[Type[Class]], List[Typedef]]
-
 
         self._static_consts = []  # type: List[StaticConst]
 
@@ -709,7 +720,6 @@ class Class(object):
             self._this_cls_type: []
         }  # type: Dict[Optional[Type[Class]], List[str]]
 
-
         # TODO we can't use set here because we need to keep order of deps
         self._deps = []  # type: List[Type[Class]]
 
@@ -731,7 +741,7 @@ class Class(object):
         self._unified_deps = []  # type: List[Class]
         self._function_decls = []  # type: List[FunctionDecl]
         self._namespace = None  # type: Optional[str]
-        self._parent_class_checked = False # type: bool
+        self._parent_class_checked = False  # type: bool
 
     def set_this_class_type(self, this_cls_type: Type["Class"]):
         self._this_cls_type = this_cls_type
@@ -740,7 +750,7 @@ class Class(object):
         # make sure user call self.set_this_class_type(__class__)
         if not self._parent_class_checked:
             self.get_parent_class()
-            self._parent_class_checked = True 
+            self._parent_class_checked = True
 
     @property
     def build_meta(self) -> BuildMeta:
@@ -1401,11 +1411,14 @@ class CodeGenerator(object):
     def code_generation(self, cus: List[Union[Class, ParameterizedClass]]):
         header_dict = OrderedDict()  # type: Dict[str, CodeSectionHeader]
         impl_dict = OrderedDict()  # type: Dict[str, CodeSectionImpl]
+        header_to_impls = OrderedDict()  # type: Dict[str, List[str]]
         for cu in cus:
             cu_header_dict, cu_impls_dict = self.generate_cu_code_v2(cu)
+            header_key = list(cu_header_dict.keys())[0]
+            header_to_impls[header_key] = list(cu_impls_dict.keys())
             header_dict.update(cu_header_dict)
             impl_dict.update(cu_impls_dict)
-        return header_dict, impl_dict
+        return header_dict, impl_dict, header_to_impls
 
     def code_written(self,
                      root: Union[str, Path],

@@ -301,7 +301,8 @@ class Pybind11ClassHandler(ManualClass):
             PybindPropDecl(member_decl, cu.namespace, cu.class_name, mw_meta))
 
     def postprocess(self):
-        # TODO find a prop setter for a getter
+        # TODO handle overload
+        # TODO handle inherit
         if self.built:
             return
         submodules = OrderedDict()  # type: Dict[str, str]

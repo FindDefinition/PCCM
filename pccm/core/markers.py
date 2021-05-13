@@ -5,8 +5,7 @@ from pccm.core import (ConstructorMeta, DestructorMeta, ExternalFunctionMeta,
                        FunctionMeta, MemberFunctionMeta, MiddlewareMeta,
                        StaticMemberFunctionMeta)
 
-PYTHON_OPERATORS_TO_CPP = {
-}
+PYTHON_OPERATORS_TO_CPP = {}
 
 
 def meta_decorator(func=None, meta: Optional[FunctionMeta] = None):
@@ -57,6 +56,7 @@ def member_function(func=None,
                     final: bool = False,
                     const: bool = False,
                     attrs: Optional[List[str]] = None,
+                    macro_guard: Optional[str] = None,
                     impl_loc: str = "",
                     impl_file_suffix: str = ".cc",
                     name=None):
@@ -68,6 +68,7 @@ def member_function(func=None,
                               override=override,
                               final=final,
                               const=const,
+                              macro_guard=macro_guard,
                               impl_loc=impl_loc,
                               impl_file_suffix=impl_file_suffix,
                               attrs=attrs)
@@ -79,6 +80,7 @@ def static_function(func=None,
                     inline: bool = False,
                     constexpr: bool = False,
                     attrs: Optional[List[str]] = None,
+                    macro_guard: Optional[str] = None,
                     impl_loc: str = "",
                     impl_file_suffix: str = ".cc",
                     name=None):
@@ -87,6 +89,7 @@ def static_function(func=None,
         inline=inline,
         constexpr=constexpr,
         attrs=attrs,
+        macro_guard=macro_guard,
         impl_loc=impl_loc,
         impl_file_suffix=impl_file_suffix,
     )
@@ -97,6 +100,7 @@ def external_function(func=None,
                       inline: bool = False,
                       constexpr: bool = False,
                       attrs: Optional[List[str]] = None,
+                      macro_guard: Optional[str] = None,
                       impl_loc: str = "",
                       impl_file_suffix: str = ".cc",
                       name=None):
@@ -105,6 +109,7 @@ def external_function(func=None,
         inline=inline,
         constexpr=constexpr,
         attrs=attrs,
+        macro_guard=macro_guard,
         impl_loc=impl_loc,
         impl_file_suffix=impl_file_suffix,
     )
@@ -115,12 +120,14 @@ def constructor(func=None,
                 inline: bool = False,
                 constexpr: bool = False,
                 attrs: Optional[List[str]] = None,
+                macro_guard: Optional[str] = None,
                 impl_loc: str = "",
                 impl_file_suffix: str = ".cc"):
     meta = ConstructorMeta(
         inline=inline,
         constexpr=constexpr,
         attrs=attrs,
+        macro_guard=macro_guard,
         impl_loc=impl_loc,
         impl_file_suffix=impl_file_suffix,
     )
@@ -131,10 +138,11 @@ def destructor(func=None,
                inline: bool = False,
                constexpr: bool = False,
                virtual: bool = True,
-                pure_virtual: bool = False,
+               pure_virtual: bool = False,
                override: bool = False,
                final: bool = False,
                attrs: Optional[List[str]] = None,
+               macro_guard: Optional[str] = None,
                impl_loc: str = "",
                impl_file_suffix: str = ".cc"):
     meta = DestructorMeta(
@@ -145,6 +153,7 @@ def destructor(func=None,
         override=override,
         final=final,
         attrs=attrs,
+        macro_guard=macro_guard,
         impl_loc=impl_loc,
         impl_file_suffix=impl_file_suffix,
     )
