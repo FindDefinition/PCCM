@@ -21,7 +21,7 @@ REQUIRES_PYTHON = '>=3.5'
 VERSION = None
 
 # What packages are required for this module to be executed?
-REQUIRED = ["ccimport>=0.1.21", "pybind11>=2.6.0", "fire"]
+REQUIRED = ["ccimport>=0.1.22", "pybind11>=2.6.0", "fire"]
 
 # What packages are optional?
 EXTRAS = {

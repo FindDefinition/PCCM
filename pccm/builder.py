@@ -27,6 +27,8 @@ def build_pybind(cus: List[Class],
                  namespace_root: Optional[Union[str, Path]] = None,
                  code_fmt: Optional[CodeFormatter] = None,
                  out_root: Optional[Union[str, Path]] = None,
+                 suffix_to_compiler: Optional[Dict[str, List[str]]] = None,
+                 disable_pch: bool = False,
                  verbose=False):
     mod_name = Path(out_path).stem
     if build_dir is None:
@@ -52,8 +54,9 @@ def build_pybind(cus: List[Class],
     HEADER_ROOT = build_dir / "include"
     SRC_ROOT = build_dir / "src"
     pch_to_sources = {} # type: Dict[Path, List[Path]]
-    for header, impls in header_to_impls.items():
-        pch_to_sources[HEADER_ROOT / header] = [SRC_ROOT / p for p in impls]
+    if not disable_pch:
+        for header, impls in header_to_impls.items():
+            pch_to_sources[HEADER_ROOT / header] = [SRC_ROOT / p for p in impls]
     includes.append(HEADER_ROOT)
     extern_build_meta = BuildMeta(includes, libpaths, libraries,
                                   additional_cflags, additional_lflags)
@@ -101,4 +104,5 @@ def build_pybind(cus: List[Class],
         build_dir=build_dir,
         out_root=out_root,
         pch_to_sources=pch_to_sources,
+        suffix_to_compiler=suffix_to_compiler,
         verbose=verbose)
