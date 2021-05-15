@@ -30,6 +30,7 @@ def build_pybind(cus: List[Class],
                  suffix_to_compiler: Optional[Dict[str, List[str]]] = None,
                  disable_pch: bool = False,
                  verbose=False):
+    
     mod_name = Path(out_path).stem
     if build_dir is None:
         build_dir = Path(out_path).parent / "build"
@@ -50,13 +51,16 @@ def build_pybind(cus: List[Class],
     pb = pybind.Pybind11(mod_name, mod_name, pybind_file_suffix)
     cg = CodeGenerator([pb], verbose=verbose)
     cg.build_graph(cus, namespace_root)
-    header_dict, impl_dict, header_to_impls = cg.code_generation(cg.get_code_units())
     HEADER_ROOT = build_dir / "include"
     SRC_ROOT = build_dir / "src"
+
+    header_dict, impl_dict, header_to_impls = cg.code_generation(cg.get_code_units())
     pch_to_sources = {} # type: Dict[Path, List[Path]]
+    pch_to_include = {} # type: Dict[Path, str]
     if not disable_pch:
         for header, impls in header_to_impls.items():
             pch_to_sources[HEADER_ROOT / header] = [SRC_ROOT / p for p in impls]
+            pch_to_include[HEADER_ROOT / header] = header
     includes.append(HEADER_ROOT)
     extern_build_meta = BuildMeta(includes, libpaths, libraries,
                                   additional_cflags, additional_lflags)
@@ -104,5 +108,6 @@ def build_pybind(cus: List[Class],
         build_dir=build_dir,
         out_root=out_root,
         pch_to_sources=pch_to_sources,
+        pch_to_include=pch_to_include,
         suffix_to_compiler=suffix_to_compiler,
         verbose=verbose)

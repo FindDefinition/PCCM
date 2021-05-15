@@ -1410,12 +1410,12 @@ class CodeGenerator(object):
     def get_code_units(self) -> List[Class]:
         return self.code_units
 
-    def code_generation(self, cus: List[Union[Class, ParameterizedClass]]):
+    def code_generation(self, cus: List[Union[Class, ParameterizedClass]], include_root : Optional[Path] = None):
         header_dict = OrderedDict()  # type: Dict[str, CodeSectionHeader]
         impl_dict = OrderedDict()  # type: Dict[str, CodeSectionImpl]
         header_to_impls = OrderedDict()  # type: Dict[str, List[str]]
         for cu in cus:
-            cu_header_dict, cu_impls_dict = self.generate_cu_code_v2(cu)
+            cu_header_dict, cu_impls_dict = self.generate_cu_code_v2(cu, include_root=include_root)
             header_key = list(cu_header_dict.keys())[0]
             header_to_impls[header_key] = list(cu_impls_dict.keys())
             header_dict.update(cu_header_dict)
@@ -1453,7 +1453,7 @@ class CodeGenerator(object):
             all_paths.append(code_path)
         return all_paths
 
-    def generate_cu_code_v2(self, cu: Class, one_impl_one_file: bool = True):
+    def generate_cu_code_v2(self, cu: Class, one_impl_one_file: bool = True, include_root : Optional[Path] = None ):
         """
         TODO multiple impl one file
         generate_code will put all Class in cus to one header file and same namespace.
@@ -1565,7 +1565,10 @@ class CodeGenerator(object):
         assert len(dtors_index_decl) <= 1, "only allow one dtor"
         for k, v in impl_dict_cls.items():
             if v:
-                impl_includes = ["#include <{}>".format(cu.include_file)]
+                if include_root is not None:
+                    impl_includes = ["#include <{}>".format(include_root / cu.include_file)]
+                else:
+                    impl_includes = ["#include <{}>".format(cu.include_file)]
                 impl_only_cls_alias = []
                 for dep in impl_only_deps[k]:
                     impl_includes.append("#include <{}>".format(
