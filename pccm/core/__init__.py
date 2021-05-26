@@ -291,10 +291,10 @@ class Member(Argument):
                                             self.default)
         else:
             if self.default is None:
-                return "{} {}[{}];".format(self.type_str, self.name,
+                return "{} {}{};".format(self.type_str, self.name,
                                            self.array)
             else:
-                return "{} {}[{}] = {};".format(self.type_str, self.name,
+                return "{} {}{} = {};".format(self.type_str, self.name,
                                                 self.array, self.default)
 
 
