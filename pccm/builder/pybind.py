@@ -48,13 +48,14 @@ def build_pybind(cus: List[Class],
         out_root = build_dir
     build_dir = Path(build_dir)
     build_dir.mkdir(exist_ok=True, parents=True, mode=0o755)
-    pb = pybind.Pybind11(mod_name, mod_name, pybind_file_suffix)
+    pb = pybind.Pybind11SplitImpl(mod_name, mod_name, pybind_file_suffix)
     cg = CodeGenerator([pb], verbose=verbose)
-    cg.build_graph(cus, namespace_root)
+    user_cus = cg.build_graph(cus, namespace_root)
     HEADER_ROOT = build_dir / "include"
     SRC_ROOT = build_dir / "src"
-
-    header_dict, impl_dict, header_to_impls = cg.code_generation(cg.get_code_units())
+    # build graph for middleware only. so we can't apply middleware again.
+    cg.build_graph(pb.get_code_units(), namespace_root, run_middleware=False)
+    header_dict, impl_dict, header_to_impls = cg.code_generation(user_cus)
     pch_to_sources = {} # type: Dict[Path, List[Path]]
     pch_to_include = {} # type: Dict[Path, str]
     if not disable_pch:

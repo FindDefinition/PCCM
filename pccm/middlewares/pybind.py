@@ -1,14 +1,14 @@
 import ast
 from collections import OrderedDict
 from enum import Enum
-from typing import Dict, List, Optional, Union, Set
+from typing import Dict, List, Optional, Union, Set, Callable
 
 from ccimport import compat
 
 from pccm.core import (Class, ConstructorMeta, ExternalFunctionMeta,
                        FunctionDecl, ManualClass, ManualClassGenerator, Member,
-                       MemberFunctionMeta, MiddlewareMeta,
-                       StaticMemberFunctionMeta, CodeSectionClassDef)
+                       MemberFunctionMeta, MiddlewareMeta, ParameterizedClass,
+                       StaticMemberFunctionMeta, CodeSectionClassDef, FunctionCode)
 from pccm.core.buildmeta import _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 from pccm.core.markers import middleware_decorator
@@ -34,6 +34,39 @@ _AUTO_ANNO_TYPES = {
     "std::string": "str",
     "void": "None",
 }  # type: Dict[str, str]
+
+_IDENTITY_DEFAULT_HANDLER = lambda x: x
+
+def _bool_default_handler(cpp_value: str):
+    if cpp_value == "true":
+        return "True"
+    elif cpp_value == "false":
+        return "False" 
+    else:
+        return cpp_value
+
+_AUTO_ANNO_TYPES_DEFAULT_HANDLER = {
+    "int": _IDENTITY_DEFAULT_HANDLER,
+    "int8_t": _IDENTITY_DEFAULT_HANDLER,
+    "int16_t": _IDENTITY_DEFAULT_HANDLER,
+    "int32_t": _IDENTITY_DEFAULT_HANDLER,
+    "int64_t": _IDENTITY_DEFAULT_HANDLER,
+    "uint8_t": _IDENTITY_DEFAULT_HANDLER,
+    "uint16_t": _IDENTITY_DEFAULT_HANDLER,
+    "uint32_t": _IDENTITY_DEFAULT_HANDLER,
+    "uint64_t": _IDENTITY_DEFAULT_HANDLER,
+    "unsigned": _IDENTITY_DEFAULT_HANDLER,
+    "long": _IDENTITY_DEFAULT_HANDLER,
+    "short": _IDENTITY_DEFAULT_HANDLER,
+    "float": _IDENTITY_DEFAULT_HANDLER,
+    "double": _IDENTITY_DEFAULT_HANDLER,
+    "unsigned long": _IDENTITY_DEFAULT_HANDLER,
+    "unsigned int": _IDENTITY_DEFAULT_HANDLER,
+    "bool": _bool_default_handler,
+    "std::string": _IDENTITY_DEFAULT_HANDLER,
+    "void": _IDENTITY_DEFAULT_HANDLER,
+}  # type: Dict[str, Callable[[str], str]]
+
 
 
 def _get_attribute_name(node, parts):
@@ -127,7 +160,7 @@ class Pybind11MethodMeta(Pybind11Meta):
                  ret_policy: ReturnPolicy = ReturnPolicy.Auto,
                  call_guard: Optional[str] = None,
                  virtual: bool = False):
-        super().__init__(Pybind11)
+        super().__init__(Pybind11SplitImpl)
         self.bind_name = bind_name
         self.method_type = method_type
         self.prop_name = prop_name
@@ -140,7 +173,7 @@ class Pybind11PropMeta(Pybind11Meta):
     """may add some attributes in future.
     """
     def __init__(self, readwrite: bool = True):
-        super().__init__(Pybind11)
+        super().__init__(Pybind11SplitImpl)
         self.readwrite = readwrite
 
 
@@ -152,7 +185,7 @@ class PybindMethodDecl(object):
         if mw_meta.bind_name:
             self.func_name = mw_meta.bind_name
         else:
-            self.func_name = decl.meta.name
+            self.func_name = decl.get_function_name()
         self.method_type = mw_meta.method_type
         member_meta = decl.meta
         if mw_meta.virtual:
@@ -187,6 +220,17 @@ class PybindMethodDecl(object):
             else:
                 self.args.append("pybind11::arg(\"{}\")".format(argu.name))
 
+    def get_overload_addr(self):
+        addr = self.addr 
+        arg_types = ", ".join([a.type_str for a in self.decl.code.arguments])
+        meta = self.decl.meta
+        addr_fmt = "pybind11::overload_cast<{}>({})"
+        if isinstance(meta, MemberFunctionMeta):
+            if meta.const:
+                addr_fmt = "pybind11::overload_cast<{}>({}, pybind11::const_)"
+        addr = addr_fmt.format(arg_types, self.addr)
+        return addr
+
     def to_string(self) -> str:
         if isinstance(self.decl.meta, ConstructorMeta):
             return ".def({}, {})".format(self.addr, ", ".join(self.args))
@@ -198,6 +242,9 @@ class PybindMethodDecl(object):
         if self.method_type == MethodType.PropGetter:
             def_stmt = "def_property_readonly"
             func_name = self.mw_meta.prop_name
+        addr = self.addr 
+        if self.decl.is_overload:
+            addr = self.get_overload_addr()
         attrs = self.args.copy()
         attrs.append(self.mw_meta.ret_policy.value)
         if self.mw_meta.call_guard is not None:
@@ -208,10 +255,10 @@ class PybindMethodDecl(object):
             def_stmt = "def_property"
         # if self.decl.meta.mw_metas
         if attrs:
-            return ".{}(\"{}\", {}, {})".format(def_stmt, func_name, self.addr,
+            return ".{}(\"{}\", {}, {})".format(def_stmt, func_name, addr,
                                                 ", ".join(attrs))
         else:
-            return ".{}(\"{}\", {})".format(def_stmt, func_name, self.addr)
+            return ".{}(\"{}\", {})".format(def_stmt, func_name, addr)
 
     def get_virtual_string(self, parent_cls_name: str):
         fmt = "{} {} {{PYBIND11_OVERRIDE({}, {}, {}, {});}}"
@@ -221,7 +268,7 @@ class PybindMethodDecl(object):
         override = ""
         if "override" not in post_meta_attrs:
             override = "override"
-        sig_str = self.decl.code.get_sig(self.decl.meta.name,
+        sig_str = self.decl.code.get_sig(self.decl.get_function_name(),
                                          self.decl.meta,
                                          withpost=True,
                                          with_semicolon=False,
@@ -265,6 +312,296 @@ class PybindClassMixin:
                                pyanno=pyanno,
                                mw_metas=mw_metas)
 
+def _postprocess_class(cls_name: str, cls_namespace: str, submod: str, decls:List[Union[PybindMethodDecl, PybindPropDecl]]):
+    # TODO handle c++ overload
+    has_virtual = False
+    vblock = None # Optional[Block]
+    virtual_decls = []  # type: List[PybindMethodDecl]
+    method_decls = []  # type: List[PybindMethodDecl]
+    prop_decls = []  # type: List[PybindPropDecl]
+    for decl in decls:
+        if isinstance(decl, PybindMethodDecl):
+            method_decls.append(decl)
+        else:
+            prop_decls.append(decl)
+    for decl in method_decls:
+        if decl.mw_meta.virtual:
+            has_virtual = True
+            virtual_decls.append(decl)
+
+    virtual_cls_name = "Py" + cls_name
+    if has_virtual:
+        virtual_cls_def = CodeSectionClassDef(
+            virtual_cls_name,
+            dep_alias=[],
+            code_before=[],
+            code_after=[],
+            external_funcs=[],
+            typedefs=["using {}::{};".format(cls_name, cls_name)],
+            static_consts=[],
+            functions=[
+                d.get_virtual_string(cls_name)
+                for d in virtual_decls
+            ],
+            members=[],
+            parent_class=cls_name)
+        ns_before, ns_after = virtual_cls_def.generate_namespace(
+            cls_namespace)
+        vblock = Block("\n".join(ns_before),
+                        [virtual_cls_def.to_block()],
+                        "\n".join(ns_after),
+                        indent=0)
+    # for every getters, match a setter if possible.
+    getter_prop_name_to_decl = {
+    }  # type: Dict[str, PybindMethodDecl]
+    for decl in method_decls:
+        if decl.method_type == MethodType.PropGetter:
+            prop_name = decl.mw_meta.prop_name
+            assert prop_name not in getter_prop_name_to_decl, "duplicate getter {}".format(
+                prop_name)
+            getter_prop_name_to_decl[decl.mw_meta.prop_name] = decl
+    setter_prop_name = set()  # type: Set[str]
+
+    for decl in method_decls:
+        if decl.method_type == MethodType.PropSetter:
+            prop_name = decl.mw_meta.prop_name
+            assert prop_name in getter_prop_name_to_decl
+            assert prop_name not in setter_prop_name, "duplicate setter {}".format(
+                prop_name)
+            getter_decl = getter_prop_name_to_decl[prop_name]
+            setter_prop_name.add(prop_name)
+            getter_decl.setter_pybind_decl = decl
+
+    has_constructor = False
+    for d in method_decls:
+        if isinstance(d.decl.meta, ConstructorMeta):
+            has_constructor = True
+            break
+    cls_qual_name = "{}::{}".format(cls_namespace.replace(".", "::"),
+                                    cls_name)
+    cls_def_arguments = [cls_qual_name]
+    if has_virtual:
+        cls_def_arguments.append("{}::{}".format(
+            cls_namespace.replace(".", "::"), virtual_cls_name))
+    cls_def_argu_str = ", ".join(cls_def_arguments)
+    cls_def = "pybind11::class_<{cls_def_argu_str}>({submod}, \"{cls_name}\")".format(
+        cls_def_argu_str=cls_def_argu_str,
+        submod=submod,
+        cls_name=cls_name)
+    cls_method_defs = []  # type: List[str]
+    if not has_constructor:
+        cls_method_defs.append(".def(pybind11::init<>())")
+    for decl in decls:
+        if isinstance(
+                decl, PybindMethodDecl
+        ) and decl.method_type == MethodType.PropSetter:
+            continue
+        cls_method_defs.append(decl.to_string())
+
+    cls_method_defs[-1] += ";"
+    cls_def_block = Block(cls_def, cls_method_defs, "")
+    return cls_def_block, vblock
+
+def _extract_anno_default(user_anno: Optional[str], type_str: str, cpp_default: Optional[str] = None ):
+    from_imports = []  # type: List[str]
+    default = None 
+    if user_anno is None:
+        if type_str in _AUTO_ANNO_TYPES:
+            user_anno = _AUTO_ANNO_TYPES[type_str]
+            if default is None:
+                if cpp_default is not None:
+                    if type_str in _AUTO_ANNO_TYPES_DEFAULT_HANDLER:
+                        handler = _AUTO_ANNO_TYPES_DEFAULT_HANDLER[type_str]
+                        default = handler(cpp_default)
+            return user_anno, from_imports, default
+    anno = None
+    if user_anno is not None:
+        user_anno_type_default = user_anno.split("=")
+        user_anno_type = user_anno_type_default[0]
+        if len(user_anno_type_default) == 2:
+            default = user_anno_type_default[1]
+
+        anno, from_imports = python_anno_parser(user_anno_type)
+    if default is None:
+        if cpp_default is not None:
+            if type_str in _AUTO_ANNO_TYPES_DEFAULT_HANDLER:
+                handler = _AUTO_ANNO_TYPES_DEFAULT_HANDLER[type_str]
+                default = handler(cpp_default)
+
+    return anno, from_imports, default
+
+def _generate_python_interface_class(cls_name: str, decls:List[Union[PybindMethodDecl, PybindPropDecl]]):
+    """
+    dep_imports
+    class xxx:
+        prop decls
+        methods (overloaded methods)
+    TODO handle c++ operators
+    TODO better code
+    TODO auto generate STL annotations
+    TODO insert docstring if exists
+    """
+    imports = [] # type: List[str]
+    # split decl to method decl and prop decl
+    method_decls = []  # type: List[PybindMethodDecl]
+    prop_decls = []  # type: List[PybindPropDecl]
+    for decl in decls:
+        if isinstance(decl, PybindMethodDecl):
+            method_decls.append(decl)
+        else:
+            prop_decls.append(decl)
+    name_to_overloaded = OrderedDict(
+    )  # type: Dict[str, List[PybindMethodDecl]]
+    decl_codes = []  # type: List[Union[Block, str]]
+    for prop_decl in prop_decls:
+        prop_anno = "Any"
+        prop_type = prop_decl.decl.type_str
+        user_anno = prop_decl.decl.pyanno
+        anno, from_imports, default = _extract_anno_default(
+            user_anno, prop_type)
+        if anno is not None:
+            prop_anno = anno
+        imports.extend(from_imports)
+        if prop_anno == cls_name:
+            prop_anno = "\"{}\"".format(prop_anno)
+        default_str = ""
+        if default is not None:
+            default_str = " = {}".format(default)
+        decl_codes.append("{}: {}{}".format(prop_decl.decl.name,
+                                            prop_anno, default_str))
+    for decl in method_decls:
+        if decl.func_name not in name_to_overloaded:
+            name_to_overloaded[decl.func_name] = []
+        name_to_overloaded[decl.func_name].append(decl)
+    for func_name, over_decls in name_to_overloaded.items():
+        if len(over_decls) == 1:
+            fmt = "{}def {}({}){}: {}..."
+        else:
+            fmt = "@overload\n{}def {}({}){}: {}..."
+        for pydecl in over_decls:
+            doc = pydecl.decl.code.generate_python_doc()
+            if doc:
+                doc_lines = doc.split("\n")
+                doc_lines = [" " * 4 + l for l in doc_lines]
+                doc_lines.insert(0, "\n    \"\"\"")
+                doc_lines.append("    \"\"\"\n    ")
+                doc = "\n".join(doc_lines)
+            res_anno = ""
+            user_anno = pydecl.decl.code.ret_pyanno
+            ret_type = pydecl.decl.code.return_type
+            anno, from_imports, default = _extract_anno_default(
+                user_anno, ret_type)
+            if anno is not None:
+                if anno == cls_name:
+                    anno = "\"{}\"".format(anno)
+                res_anno = " -> {}".format(anno)
+                imports.extend(from_imports)
+            decl_func_name = func_name
+            if isinstance(pydecl.decl.meta, ConstructorMeta):
+                decl_func_name = "__init__"
+
+            arg_names = []  # type: List[str]
+            have_default = False # type: bool
+            for arg in pydecl.decl.code.arguments:
+                user_anno = arg.pyanno
+                user_anno, from_imports, default = _extract_anno_default(
+                    user_anno, arg.type_str, arg.default)
+                default_str = ""
+                if default is not None:
+                    default_str = " = {}".format(default)
+                    have_default = True 
+                else:
+                    if have_default:
+                        msg = ("you must provide a python default anno value "
+                            "for {} of {}. format: PythonType = Default")
+                        raise ValueError(msg.format(arg.name, decl_func_name))
+                if user_anno is not None:
+                    if user_anno == cls_name:
+                        user_anno = "\"{}\"".format(user_anno)
+                    imports.extend(from_imports)
+                    arg_names.append("{}: {}{}".format(
+                        arg.name, user_anno, default_str))
+                else:
+                    arg_names.append(arg.name)
+            if not isinstance(
+                    pydecl.decl.meta,
+                (ExternalFunctionMeta, StaticMemberFunctionMeta)):
+                arg_names.insert(0, "self")
+            py_sig = ", ".join(arg_names)
+            decorator = ""
+            if isinstance(pydecl.decl.meta,
+                            StaticMemberFunctionMeta):
+                decorator = "@staticmethod\n"
+            if pydecl.method_type == MethodType.PropGetter:
+                decorator = "@property\n"
+                decl_func_name = pydecl.mw_meta.prop_name
+            elif pydecl.method_type == MethodType.PropSetter:
+                decorator = "@{}.setter\n".format(
+                    pydecl.mw_meta.prop_name)
+                decl_func_name = pydecl.mw_meta.prop_name
+
+            decl_codes.append(
+                fmt.format(decorator, decl_func_name, py_sig,
+                            res_anno, doc))
+    class_block = Block("class {}:".format(cls_name), decl_codes)
+    return class_block, imports
+
+class Pybind11SingleClassHandler(ManualClass):
+    # TODO split pybind defs to multiple file for faster compilation.
+    # TODO handle inherit
+    def __init__(self, cu: Class, file_suffix: str = ".cc"):
+        super().__init__()
+        self.add_include("pybind11/stl.h")
+        self.add_include("pybind11/pybind11.h")
+        self.add_include("pybind11/numpy.h")
+        self.file_suffix = file_suffix
+        self.built = False
+
+        self.func_decls = [] # type: List[PybindMethodDecl]
+        self.prop_decls = [] # type: List[PybindPropDecl]
+        self.cu = cu 
+
+        self.bind_func_name = "bind_{}".format(cu.class_name)
+
+    def get_pybind_decls(self) -> List[Union[PybindMethodDecl, PybindPropDecl]]:
+        res = [] # type: List[Union[PybindMethodDecl, PybindPropDecl]]
+        res.extend(self.func_decls)
+        res.extend(self.prop_decls)
+        return res 
+
+    def handle_function_decl(self, cu: Class, func_decl: FunctionDecl,
+                             mw_meta: Pybind11MethodMeta):
+        assert cu.namespace is not None 
+        self.func_decls.append(
+            PybindMethodDecl(func_decl, cu.namespace, cu.class_name, mw_meta))
+
+    def handle_member(self, cu: Class, member_decl: Member,
+                      mw_meta: Pybind11PropMeta):
+        assert cu.namespace is not None 
+        self.prop_decls.append(
+            PybindPropDecl(member_decl, cu.namespace, cu.class_name, mw_meta))
+
+
+    def postprocess(self):
+        if self.built:
+            return
+        bind_code = FunctionCode()
+        bind_code.arg("module", "const pybind11::module_&")
+        func_meta = StaticMemberFunctionMeta(impl_file_suffix=self.file_suffix)
+        cls_def_block, vblock = _postprocess_class(self.cu.class_name, self.cu.namespace, "module", self.get_pybind_decls())
+        func_meta.name = self.bind_func_name
+        if vblock is not None:
+            bind_code.code_after_include = "\n".join(generate_code(vblock, 0, 2))
+        bind_code.raw("\n".join(generate_code(cls_def_block, 0, 2)))
+        func_decl = FunctionDecl(func_meta, bind_code)
+        self.add_func_decl(func_decl)
+        # TODO better code
+        if not isinstance(self.cu, ParameterizedClass):
+            self.add_impl_only_dependency_by_name(self.bind_func_name, type(self.cu))
+        else:
+            self.add_impl_only_param_class_by_name(self.bind_func_name, "bind", self.cu)
+        self.built = True
+
 
 class Pybind11ClassHandler(ManualClass):
     # TODO split pybind defs to multiple file for faster compilation.
@@ -282,6 +619,7 @@ class Pybind11ClassHandler(ManualClass):
 
     def handle_function_decl(self, cu: Class, func_decl: FunctionDecl,
                              mw_meta: Pybind11MethodMeta):
+        assert cu.namespace is not None 
         if cu.namespace not in self.ns_to_cls_to_func_prop_decls:
             self.ns_to_cls_to_func_prop_decls[cu.namespace] = OrderedDict()
         cls_to_func_decls = self.ns_to_cls_to_func_prop_decls[cu.namespace]
@@ -292,6 +630,7 @@ class Pybind11ClassHandler(ManualClass):
 
     def handle_member(self, cu: Class, member_decl: Member,
                       mw_meta: Pybind11PropMeta):
+        assert cu.namespace is not None 
         if cu.namespace not in self.ns_to_cls_to_func_prop_decls:
             self.ns_to_cls_to_func_prop_decls[cu.namespace] = OrderedDict()
         cls_to_prop_decls = self.ns_to_cls_to_func_prop_decls[cu.namespace]
@@ -325,92 +664,10 @@ class Pybind11ClassHandler(ManualClass):
         virtual_class_defs = []  # type: List[Block]
         for ns, cls_to_decl in self.ns_to_cls_to_func_prop_decls.items():
             for cls_name, decls in cls_to_decl.items():
-                # find virtual pybind functions.
-                has_virtual = False
-                virtual_decls = []  # type: List[PybindMethodDecl]
-                for decl in decls:
-                    if isinstance(decl,
-                                  PybindMethodDecl) and decl.mw_meta.virtual:
-                        has_virtual = True
-                        virtual_decls.append(decl)
-                virtual_cls_name = "Py" + cls_name
-                if has_virtual:
-                    virtual_cls_def = CodeSectionClassDef(
-                        virtual_cls_name,
-                        dep_alias=[],
-                        code_before=[],
-                        code_after=[],
-                        external_funcs=[],
-                        typedefs=["using {}::{};".format(cls_name, cls_name)],
-                        static_consts=[],
-                        functions=[
-                            d.get_virtual_string(cls_name)
-                            for d in virtual_decls
-                        ],
-                        members=[],
-                        parent_class=cls_name)
-                    ns_before, ns_after = virtual_cls_def.generate_namespace(
-                        ns)
-                    block = Block("\n".join(ns_before),
-                                  [virtual_cls_def.to_block()],
-                                  "\n".join(ns_after),
-                                  indent=0)
-                    virtual_class_defs.append(block)
-                # for every getters, match a setter if possible.
-                getter_prop_name_to_decl = {
-                }  # type: Dict[str, PybindMethodDecl]
-                for decl in decls:
-                    if isinstance(
-                            decl, PybindMethodDecl
-                    ) and decl.method_type == MethodType.PropGetter:
-                        prop_name = decl.mw_meta.prop_name
-                        assert prop_name not in getter_prop_name_to_decl, "duplicate getter {}".format(
-                            prop_name)
-                        getter_prop_name_to_decl[decl.mw_meta.prop_name] = decl
-                setter_prop_name = set()  # type: Set[str]
-
-                for decl in decls:
-                    if isinstance(
-                            decl, PybindMethodDecl
-                    ) and decl.method_type == MethodType.PropSetter:
-                        prop_name = decl.mw_meta.prop_name
-                        assert prop_name in getter_prop_name_to_decl
-                        assert prop_name not in setter_prop_name, "duplicate setter {}".format(
-                            prop_name)
-                        getter_decl = getter_prop_name_to_decl[prop_name]
-                        setter_prop_name.add(prop_name)
-                        getter_decl.setter_pybind_decl = decl
-
-                has_constructor = False
-                for d in decls:
-                    if isinstance(d, PybindMethodDecl) and isinstance(
-                            d.decl.meta, ConstructorMeta):
-                        has_constructor = True
-                        break
-                cls_qual_name = "{}::{}".format(ns.replace(".", "::"),
-                                                cls_name)
-                cls_def_arguments = [cls_qual_name]
-                if has_virtual:
-                    cls_def_arguments.append("{}::{}".format(
-                        ns.replace(".", "::"), virtual_cls_name))
-                cls_def_argu_str = ", ".join(cls_def_arguments)
                 submod = submodules[ns]
-                cls_def = "pybind11::class_<{cls_def_argu_str}>({submod}, \"{cls_name}\")".format(
-                    cls_def_argu_str=cls_def_argu_str,
-                    submod=submod,
-                    cls_name=cls_name)
-                cls_method_defs = []  # type: List[str]
-                if not has_constructor:
-                    cls_method_defs.append(".def(pybind11::init<>())")
-                for decl in decls:
-                    if isinstance(
-                            decl, PybindMethodDecl
-                    ) and decl.method_type == MethodType.PropSetter:
-                        continue
-                    cls_method_defs.append(decl.to_string())
-
-                cls_method_defs[-1] += ";"
-                cls_def_block = Block(cls_def, cls_method_defs, "")
+                cls_def_block, vblock = _postprocess_class(cls_name, ns, submod, decls)
+                if vblock is not None:
+                    virtual_class_defs.append(vblock)
                 class_defs.append(cls_def_block)
         code_block = Block("PYBIND11_MODULE({}, m){{".format(self.module_name),
                            sub_defs + class_defs, "}")
@@ -418,23 +675,6 @@ class Pybind11ClassHandler(ManualClass):
         self.add_impl_main("{}_pybind_main".format(self.module_name),
                            "\n".join(code), self.file_suffix)
         self.built = True
-
-    def _extract_anno_with_cache(self, user_anno: Optional[str], type_str: str,
-                                 type_to_anno_cache: Dict[str, str]):
-        from_imports = []  # type: List[str]
-        if user_anno is None:
-            if type_str in _AUTO_ANNO_TYPES:
-                user_anno = _AUTO_ANNO_TYPES[type_str]
-                return user_anno, from_imports
-        if user_anno is None:
-            # find anno in cache
-            if type_str in type_to_anno_cache:
-                user_anno = type_to_anno_cache[type_str]
-        anno = None
-        if user_anno is not None:
-            anno, from_imports = python_anno_parser(user_anno)
-            type_to_anno_cache[type_str] = user_anno
-        return anno, from_imports
 
     def generate_python_interface(self):
         """
@@ -449,99 +689,101 @@ class Pybind11ClassHandler(ManualClass):
         """
         init_import = "from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union"
         ns_to_interface = OrderedDict()  # type: Dict[str, str]
-        type_to_anno_cache = {}  # type: Dict[str, str]
         for ns, cls_to_decl in self.ns_to_cls_to_func_prop_decls.items():
             imports = [init_import]  # type: List[str]
             ns_cls_blocks = []  # type: List[Block]
             for cls_name, decls in cls_to_decl.items():
-                # split decl to method decl and prop decl
-                method_decls = []  # type: List[PybindMethodDecl]
-                prop_decls = []  # type: List[PybindPropDecl]
-                for decl in decls:
-                    if isinstance(decl, PybindMethodDecl):
-                        method_decls.append(decl)
-                    else:
-                        prop_decls.append(decl)
-                name_to_overloaded = OrderedDict(
-                )  # type: Dict[str, List[PybindMethodDecl]]
-                decl_codes = []  # type: List[Union[Block, str]]
-                for prop_decl in prop_decls:
-                    prop_anno = "Any"
-                    prop_type = prop_decl.decl.type_str
-                    user_anno = prop_decl.decl.pyanno
-                    anno, from_imports = self._extract_anno_with_cache(
-                        user_anno, prop_type, type_to_anno_cache)
-                    if anno is not None:
-                        prop_anno = anno
-                    imports.extend(from_imports)
-                    if prop_anno == cls_name:
-                        prop_anno = "\"{}\"".format(prop_anno)
-
-                    decl_codes.append("{}: {}".format(prop_decl.decl.name,
-                                                      prop_anno))
-                for decl in method_decls:
-                    if decl.func_name not in name_to_overloaded:
-                        name_to_overloaded[decl.func_name] = []
-                    name_to_overloaded[decl.func_name].append(decl)
-                for func_name, over_decls in name_to_overloaded.items():
-                    if len(over_decls) == 1:
-                        fmt = "{}def {}({}){}: ..."
-                    else:
-                        fmt = "@overload\n{}def {}({}){}: ..."
-                    for pydecl in over_decls:
-                        res_anno = ""
-                        user_anno = pydecl.decl.code.ret_pyanno
-                        ret_type = pydecl.decl.code.return_type
-                        anno, from_imports = self._extract_anno_with_cache(
-                            user_anno, ret_type, type_to_anno_cache)
-                        if anno is not None:
-                            if anno == cls_name:
-                                anno = "\"{}\"".format(anno)
-                            res_anno = " -> {}".format(anno)
-                            imports.extend(from_imports)
-                        decl_func_name = func_name
-                        if isinstance(pydecl.decl.meta, ConstructorMeta):
-                            decl_func_name = "__init__"
-
-                        arg_names = []  # type: List[str]
-                        for arg in pydecl.decl.code.arguments:
-                            user_anno = arg.pyanno
-                            user_anno, from_imports = self._extract_anno_with_cache(
-                                user_anno, arg.type_str, type_to_anno_cache)
-                            if user_anno is not None:
-                                if user_anno == cls_name:
-                                    user_anno = "\"{}\"".format(user_anno)
-                                imports.extend(from_imports)
-                                arg_names.append("{}: {}".format(
-                                    arg.name, user_anno))
-                            else:
-                                arg_names.append(arg.name)
-                        if not isinstance(
-                                pydecl.decl.meta,
-                            (ExternalFunctionMeta, StaticMemberFunctionMeta)):
-                            arg_names.insert(0, "self")
-                        py_sig = ", ".join(arg_names)
-                        decorator = ""
-                        if isinstance(pydecl.decl.meta,
-                                      StaticMemberFunctionMeta):
-                            decorator = "@staticmethod\n"
-                        if pydecl.method_type == MethodType.PropGetter:
-                            decorator = "@property\n"
-                            decl_func_name = pydecl.mw_meta.prop_name
-                        elif pydecl.method_type == MethodType.PropSetter:
-                            decorator = "@{}.setter\n".format(
-                                pydecl.mw_meta.prop_name)
-                            decl_func_name = pydecl.mw_meta.prop_name
-
-                        decl_codes.append(
-                            fmt.format(decorator, decl_func_name, py_sig,
-                                       res_anno))
-                class_block = Block("class {}:".format(cls_name), decl_codes)
+                class_block, cls_imports = _generate_python_interface_class(cls_name, decls)
+                imports.extend(cls_imports)
                 ns_cls_blocks.append(class_block)
             imports = _unique_list_keep_order(imports)
-
             ns_to_interface[ns] = "\n".join(
                 generate_code_list(imports + ns_cls_blocks, 0, 4))
+        return ns_to_interface
+
+class Pybind11SplitMain(ParameterizedClass):
+    # TODO handle inherit
+    def __init__(self, module_name: str, file_suffix: str = ".cc"):
+        super().__init__()
+        self.ns_to_cls_to_func_prop_decls = OrderedDict(
+        )  # type: Dict[str, Dict[str, List[Union[PybindMethodDecl, PybindPropDecl]]]]
+        self.module_name = module_name
+        self.add_include("pybind11/stl.h")
+        self.add_include("pybind11/pybind11.h")
+        self.add_include("pybind11/numpy.h")
+        self.file_suffix = file_suffix
+        self.built = False
+
+    def postprocess(self, bind_cus: List[Pybind11SingleClassHandler]):
+        # TODO handle inherit
+        if self.built:
+            return
+        submodules = OrderedDict()  # type: Dict[str, str]
+        sub_defs = []  # type: List[str]
+        for bind_cu in bind_cus:
+            origin_cu = bind_cu.cu 
+            ns = origin_cu.namespace
+            ns_parts = ns.split(".")
+            for i in range(1, len(ns_parts) + 1):
+                sub_name = "_".join(ns_parts[:i])
+                sub_ns = ".".join(ns_parts[:i])
+                if i == 1:
+                    parent_name = "m"
+                else:
+                    parent_name = "m_{}".format("_".join(ns_parts[:i - 1]))
+                if sub_ns not in submodules:
+                    stmt = "pybind11::module_ m_{} = {}.def_submodule(\"{}\");".format(
+                        sub_name, parent_name, ns_parts[i - 1])
+                    sub_defs.append(stmt)
+                    submodules[sub_ns] = "m_{}".format(sub_name)
+        create_stmts = [] # type: List[str]
+        for bind_cu in bind_cus:
+            assert bind_cu.namespace is not None 
+            bind_ns = bind_cu.namespace
+            submodule_name = submodules[bind_ns]
+            bind_func_name = "{}::{}::{}".format(bind_ns.replace(".", "::"), bind_cu.class_name, bind_cu.bind_func_name)
+            create_stmts.append("{}({});".format(bind_func_name, submodule_name))
+
+        code_block = Block("PYBIND11_MODULE({}, m){{".format(self.module_name),
+                           sub_defs + create_stmts, "}")
+        code = generate_code(code_block, 0, 2)
+        self.add_impl_main("{}_pybind_main".format(self.module_name),
+                           "\n".join(code), self.file_suffix)
+        self.built = True
+
+    def generate_python_interface(self, bind_cus: List[Pybind11SingleClassHandler]):
+        """
+        dep_imports
+        class xxx:
+            prop decls
+            methods (overloaded methods)
+        TODO handle c++ operators
+        TODO better code
+        TODO auto generate STL annotations
+        TODO insert docstring if exists
+        """
+        init_import = "from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union"
+        ns_to_interfaces = OrderedDict()  # type: Dict[str, List[Block]]
+        ns_to_imports = OrderedDict()  # type: Dict[str, List[str]]
+        ns_to_interface = OrderedDict()  # type: Dict[str, str]
+
+        for bind_cu in bind_cus:
+            origin_cu = bind_cu.cu 
+            ns = origin_cu.namespace
+            assert ns is not None 
+            if ns not in ns_to_interfaces:
+                ns_to_interfaces[ns] = [] 
+                ns_to_imports[ns] = [] 
+            class_block, cls_imports = _generate_python_interface_class(origin_cu.class_name, bind_cu.get_pybind_decls())
+            ns_to_imports[ns].extend(cls_imports)
+            ns_to_interfaces[ns].append(class_block)
+
+        for k, interfaces in ns_to_interfaces.items():
+            imports = ns_to_imports[k]
+            imports.insert(0, init_import)
+            imports = _unique_list_keep_order(imports)
+            ns_to_interface[k] = "\n".join(
+                generate_code_list(imports + interfaces, 0, 4))
         return ns_to_interface
 
 
@@ -566,6 +808,39 @@ class Pybind11(ManualClassGenerator):
     def generate_python_interface(self):
         return self.singleton.generate_python_interface()
 
+class Pybind11SplitImpl(ManualClassGenerator):
+    def __init__(self,
+                 module_name: str,
+                 subnamespace: str,
+                 file_suffix: str = ".cc"):
+        super().__init__(subnamespace)
+        self.file_suffix = file_suffix 
+        self.module_name = module_name
+        self.main_cu = Pybind11SplitMain(module_name, file_suffix)
+        self.main_cu.graph_inited = True
+        self.main_cu.namespace = "{}_pybind_main".format(module_name)
+        self.bind_cus = [] # type: List[Pybind11SingleClassHandler]
+
+    def create_manual_class(self, cu: Class) -> ManualClass:
+        bind_cu = Pybind11SingleClassHandler(cu, self.file_suffix)
+        bind_cu.class_name = "PyBind" + cu.class_name
+        bind_cu.namespace = cu.namespace
+        self.bind_cus.append(bind_cu)
+        self.main_cu._unified_deps.append(bind_cu)
+        # self.main_cu.add_param_class("bind_{}".format(bind_cu.class_name), bind_cu)
+        return bind_cu
+
+    def get_code_units(self) -> List[Class]:
+        for bind in self.bind_cus:
+            bind.postprocess()
+        self.main_cu.postprocess(self.bind_cus)
+        res = [] # type: List[Class]
+        res.extend(self.bind_cus)
+        res.append(self.main_cu)
+        return res
+
+    def generate_python_interface(self):
+        return self.main_cu.generate_python_interface(self.bind_cus)
 
 def mark(func=None,
          bind_name: str = "",
@@ -608,7 +883,6 @@ def mark_prop_setter(func=None,
                 nogil=nogil)
 
 
-pybind_mark = mark
 
 if __name__ == "__main__":
     # print(ast.parse)

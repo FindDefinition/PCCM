@@ -10,7 +10,16 @@ from pccm.test_data.mod import Test3, Test4, PbTestVirtual
 
 def test_core():
     cu = Test4()
-    lib = builder.build_pybind([cu, PbTestVirtual()], Path(__file__).parent / "wtf2")
+    cu_scratch = core.Class()
+    scratch_meta = core.StaticMemberFunctionMeta(name="scratch_func")
+    scratch_code_obj = core.FunctionCode("")
+    scratch_code_obj.raw("""
+    return 50051;
+    """).ret("int")
+    cu_scratch.add_func_decl(core.FunctionDecl(scratch_meta, scratch_code_obj))
+    cu_scratch.namespace = "scratch"
+    cu_scratch.class_name = "ScratchClass"
+    lib = builder.build_pybind([cu_scratch, cu, PbTestVirtual()], Path(__file__).parent / "wtf2")
     assert lib.pccm.test_data.mod.Test4.add_static(1, 2) == 3
     t3 = lib.pccm.test_data.mod.Test3()
     t3.square_prop = 5

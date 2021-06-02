@@ -11,7 +11,7 @@ class Test3(pccm.Class):
                         "int",
                         pyanno="int",
                         mw_metas=[pccm.pybind.Pybind11PropMeta()])
-        self.add_member("private_prop_", "int", "0")
+        self.add_member("private_prop_", "int", "0", doc="a private prop. \ndetails.")
 
     @pccm.pybind.mark
     @pccm.member_function(inline=True)
@@ -64,6 +64,16 @@ class Test4(Test3):
         return a + b;
         """).arg("a,b", "int").ret("int")
         return code
+
+    @pccm.pybind.mark(nogil=True)
+    @pccm.member_function(inline=True, name="add2", const=True)
+    def add2_overload(self):
+        code = pccm.FunctionCode("")
+        code.raw("""
+        return a + b;
+        """).arg("a,b", "int").ret("int")
+        return code
+
 
 class PbTestVirtual(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
