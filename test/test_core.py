@@ -40,6 +40,11 @@ def test_core():
     vobj.run_pure_virtual_func_2(3, 4)
     assert vobj.a == 7
 
+    assert vobj.EnumExample.kValue1.name == "kValue1"
+    assert vobj.EnumExample.kValue1.value == 1
+    assert vobj.EnumExample.kValue1 | vobj.EnumExample.kValue2 == 3
+    assert vobj.kValue1 | vobj.kValue2 == 3
+
 
 if __name__ == "__main__":
     test_core()

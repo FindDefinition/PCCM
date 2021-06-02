@@ -65,8 +65,11 @@ def build_pybind(cus: List[Class],
     includes.append(HEADER_ROOT)
     extern_build_meta = BuildMeta(includes, libpaths, libraries,
                                   additional_cflags, additional_lflags)
-    for cu in cg.get_code_units():
+    for cu in user_cus:
         extern_build_meta += cu.build_meta
+    for cu in pb.get_code_units():
+        extern_build_meta += cu.build_meta
+
     cg.code_written(HEADER_ROOT, header_dict, code_fmt)
     paths = cg.code_written(SRC_ROOT, impl_dict, code_fmt)
     header_dict, impl_dict, header_to_impls = cg.code_generation(pb.get_code_units())

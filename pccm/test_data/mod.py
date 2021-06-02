@@ -1,3 +1,4 @@
+import enum
 import pccm
 from pccm.test_data import PTest1, Test2
 
@@ -41,7 +42,6 @@ class Test3(pccm.Class):
         code.arg("val", "int")
         return code 
 
-
 class Test4(Test3):
     def __init__(self):
         super().__init__()
@@ -79,6 +79,8 @@ class PbTestVirtual(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
         self.add_pybind_member("a", "int", "0")
+        self.add_enum_class("EnumClassExample", [("kValue1", 1), ("kValue2", 2)])
+        self.add_enum("EnumExample", [("kValue1", 1), ("kValue2", 2)])
 
     @pccm.pybind.mark(virtual=True)
     @pccm.member_function(virtual=True)

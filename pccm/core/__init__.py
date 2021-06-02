@@ -268,6 +268,30 @@ class StaticConst(object):
         return "static constexpr {} {} = {};".format(self.type, self.name,
                                                      self.value)
 
+class EnumClass(object):
+    """enum class, limited usage.
+    all value of item must be provided, and must be a integer.
+    """
+    def __init__(self, name: str, items: List[Tuple[str, int]], base_type: str = "", scoped: bool = True):
+        self.name = name
+        self.items = items
+        self.base_type = base_type  # type: str
+        self.scoped = scoped
+
+    def to_string(self) -> str:
+        scoped_str = ""
+        if self.scoped:
+            scoped_str = "class"
+        prefix = "enum {} {} {{".format(scoped_str, self.name)
+        if self.base_type:
+            prefix = "enum {} {}: {} {{".format(scoped_str, self.name, self.base_type)
+        items = [] # type: List[str]
+        for k, v in self.items:
+            assert isinstance(v, int), "v must be int."
+            items.append("{} = {},".format(k, v))
+        block = Block(prefix, items, "};")
+        return "\n".join(generate_code(block, 0, 2))
+
 
 class Member(Argument):
     def __init__(self,
@@ -760,7 +784,7 @@ class Class(object):
         }  # type: Dict[Optional[Type[Class]], List[Typedef]]
 
         self._static_consts = []  # type: List[StaticConst]
-
+        self._enum_classes = [] # type: List[EnumClass]
         self._this_type_to_static_consts = {
             self._this_cls_type: []
         }  # type: Dict[Optional[Type[Class]], List[StaticConst]]
@@ -1006,6 +1030,16 @@ class Class(object):
     def add_static_const(self, name: str, type: str, value: str):
         self._static_consts.append(StaticConst(name, type, value))
 
+    def add_enum_class(self, name: str, items: List[Tuple[str, int]], base_type: str = ""):
+        """a limited enum for pccm. every value of enumerator must provided, must be int.
+        """
+        self._enum_classes.append(EnumClass(name, items, base_type))
+
+    def add_enum(self, name: str, items: List[Tuple[str, int]], base_type: str = ""):
+        """a limited enum for pccm. every value of enumerator must provided, must be int.
+        """
+        self._enum_classes.append(EnumClass(name, items, base_type, False))
+
     def add_code_before_class(self, code: str):
         """this function should only be used for macro defs.
         """
@@ -1117,6 +1151,7 @@ class Class(object):
         dep_alias = self.get_common_dependency_aliases()
         typedef_strs = [d.to_string() for d in self._typedefs]
         sc_strs = [d.to_string() for d in self._static_consts]
+        ec_strs = [d.to_string() for d in self._enum_classes]
 
         member_def_strs = [
             d.to_string() for d in self._members
@@ -1129,7 +1164,7 @@ class Class(object):
             parent_class_alias = parent.__name__
         cdef = CodeSectionClassDef(cu_name, dep_alias, self._code_before_class,
                                    self._code_after_class, ext_decls,
-                                   typedef_strs, sc_strs, member_func_decls,
+                                   ec_strs, typedef_strs, sc_strs, member_func_decls,
                                    member_def_strs, parent_class_alias)
         return cdef
 
@@ -1252,6 +1287,7 @@ class CodeSectionClassDef(CodeSection):
                  code_before: List[str],
                  code_after: List[str],
                  external_funcs: List[str],
+                 enum_classes: List[str],
                  typedefs: List[str],
                  static_consts: List[str],
                  functions: List[str],
@@ -1267,11 +1303,12 @@ class CodeSectionClassDef(CodeSection):
         self.functions = functions
         self.members = members
         self.parent_class = parent_class
+        self.enum_classes = enum_classes
 
     def to_block(self) -> Block:
         code_before_cls = self.dep_alias + self.code_before + generate_code_list(
             self.external_funcs, 0, 2)
-        class_contents = self.typedefs + self.members + self.static_consts + self.functions
+        class_contents = self.typedefs + self.members + self.enum_classes + self.static_consts + self.functions
         if self.parent_class is not None:
             prefix = code_before_cls + [
                 "struct {class_name} : public {parent} {{".format(
