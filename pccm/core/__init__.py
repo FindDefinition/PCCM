@@ -9,7 +9,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 from ccimport import compat, loader
 
-from pccm.constants import PCCM_FUNC_META_KEY, PCCM_MAGIC_STRING, PCCM_INIT_DECORATOR_KEY
+from pccm.constants import (PCCM_FUNC_META_KEY, PCCM_INIT_DECORATOR_KEY,
+                            PCCM_MAGIC_STRING)
 from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 
@@ -237,7 +238,7 @@ class Argument(object):
                  default: Optional[str] = None,
                  array: Optional[str] = None,
                  pyanno: Optional[str] = None,
-                 doc: Optional[str] = None ):
+                 doc: Optional[str] = None):
         self.name = name.strip()
         self.type_str = str(type).strip()  # type: str
         self.default = default
@@ -268,11 +269,16 @@ class StaticConst(object):
         return "static constexpr {} {} = {};".format(self.type, self.name,
                                                      self.value)
 
+
 class EnumClass(object):
     """enum class, limited usage.
     all value of item must be provided, and must be a integer.
     """
-    def __init__(self, name: str, items: List[Tuple[str, int]], base_type: str = "", scoped: bool = True):
+    def __init__(self,
+                 name: str,
+                 items: List[Tuple[str, int]],
+                 base_type: str = "",
+                 scoped: bool = True):
         self.name = name
         self.items = items
         self.base_type = base_type  # type: str
@@ -284,8 +290,9 @@ class EnumClass(object):
             scoped_str = "class"
         prefix = "enum {} {} {{".format(scoped_str, self.name)
         if self.base_type:
-            prefix = "enum {} {}: {} {{".format(scoped_str, self.name, self.base_type)
-        items = [] # type: List[str]
+            prefix = "enum {} {}: {} {{".format(scoped_str, self.name,
+                                                self.base_type)
+        items = []  # type: List[str]
         for k, v in self.items:
             assert isinstance(v, int), "v must be int."
             items.append("{} = {},".format(k, v))
@@ -302,7 +309,7 @@ class Member(Argument):
                  array: Optional[str] = None,
                  pyanno: Optional[str] = None,
                  mw_metas: Optional[List[MiddlewareMeta]] = None,
-                 doc: Optional[str] = None ):
+                 doc: Optional[str] = None):
         super().__init__(name, type, default, array, pyanno, doc)
         if mw_metas is None:
             mw_metas = []
@@ -322,7 +329,7 @@ class Member(Argument):
                 return "{}{} {};".format(doc, self.type_str, self.name)
             else:
                 return "{}{} {} = {};".format(doc, self.type_str, self.name,
-                                            self.default)
+                                              self.default)
         else:
             if self.default is None:
                 return "{}{} {}{};".format(doc, self.type_str, self.name,
@@ -396,10 +403,10 @@ class FunctionCode(object):
         ]  # type: List[Union[TemplateTypeArgument, TemplateNonTypeArgument]]
         self._blocks = [Block("", [], indent=0)]  # type: List[Block]
         self.raw(code)
-        self.ret_doc = None # type: Optional[str]
+        self.ret_doc = None  # type: Optional[str]
         self.ret_pyanno = None  # type: Optional[str]
         self.func_doc = None  # type: Optional[str]
-        self.code_after_include = None # type: Optional[str]
+        self.code_after_include = None  # type: Optional[str]
 
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0
@@ -650,7 +657,10 @@ class FunctionCode(object):
                 TemplateNonTypeArgument(part.strip(), type, default, packed))
         return self
 
-    def ret(self, return_type: str, pyanno: Optional[str] = None, doc: Optional[str] = None ):
+    def ret(self,
+            return_type: str,
+            pyanno: Optional[str] = None,
+            doc: Optional[str] = None):
         """set function return type.
         """
         self.return_type = return_type.strip()
@@ -708,12 +718,12 @@ class FunctionDecl(object):
     def __init__(self, meta: FunctionMeta, code: FunctionCode):
         self.meta = meta
         self.code = code
-        self.is_overload = False # type: bool
-
+        self.is_overload = False  # type: bool
 
     def get_function_name(self) -> str:
-        assert self.meta.name is not None 
-        return self.meta.name 
+        assert self.meta.name is not None
+        return self.meta.name
+
 
 def _init_decorator(func, cls):
     def wrapper(self, *args, **kwargs):
@@ -784,7 +794,7 @@ class Class(object):
         }  # type: Dict[Optional[Type[Class]], List[Typedef]]
 
         self._static_consts = []  # type: List[StaticConst]
-        self._enum_classes = [] # type: List[EnumClass]
+        self._enum_classes = []  # type: List[EnumClass]
         self._this_type_to_static_consts = {
             self._this_cls_type: []
         }  # type: Dict[Optional[Type[Class]], List[StaticConst]]
@@ -826,7 +836,7 @@ class Class(object):
         self._function_decls = []  # type: List[FunctionDecl]
         self._namespace = None  # type: Optional[str]
         self._parent_class_checked = False  # type: bool
-        self._user_provided_class_name = None # type: Optional[str]
+        self._user_provided_class_name = None  # type: Optional[str]
 
     def set_this_class_type(self, this_cls_type: Type["Class"]):
         self._this_cls_type = this_cls_type
@@ -901,9 +911,9 @@ class Class(object):
     def _assign_overload_flag_to_func_decls(self):
         # TODO member function can't overload static function.
         # we handle overload in three group: extend functions, member functions and static member functions.
-        extend_decl_count = defaultdict(int) # type: Dict[str, int]
-        member_decl_count = defaultdict(int) # type: Dict[str, int]
-        static_member_decl_count = defaultdict(int) # type: Dict[str, int]
+        extend_decl_count = defaultdict(int)  # type: Dict[str, int]
+        member_decl_count = defaultdict(int)  # type: Dict[str, int]
+        static_member_decl_count = defaultdict(int)  # type: Dict[str, int]
         for decl in self._function_decls:
             cpp_func_name = decl.get_function_name()
             if isinstance(decl.meta, ExternalFunctionMeta):
@@ -923,7 +933,6 @@ class Class(object):
             elif isinstance(decl.meta, MemberFunctionMeta):
                 if member_decl_count[cpp_func_name] > 1:
                     decl.is_overload = True
-
 
     def add_dependency(self, *no_param_class_cls: Type["Class"]):
         # TODO enable name alias for Class
@@ -986,7 +995,7 @@ class Class(object):
         return self.add_param_class(subnamespace, param_class, name_alias)
 
     def add_impl_only_dependency_by_name(self, name: str,
-                                 *no_param_class_cls: Type["Class"]):
+                                         *no_param_class_cls: Type["Class"]):
         if name not in self._impl_only_cls_dep:
             self._impl_only_cls_dep[name] = []
         for npcls in no_param_class_cls:
@@ -996,11 +1005,10 @@ class Class(object):
                 self.add_dependency(npcls)
 
     def add_impl_only_param_class_by_name(self,
-                                  name_or_names: Union[str,
-                                                List[str]],
-                                  subnamespace: str,
-                                  param_class: "ParameterizedClass",
-                                  name_alias: Optional[str] = None):
+                                          name_or_names: Union[str, List[str]],
+                                          subnamespace: str,
+                                          param_class: "ParameterizedClass",
+                                          name_alias: Optional[str] = None):
         """this function should only be used for dynamic Class.
         """
         if not isinstance(name_or_names, list):
@@ -1010,7 +1018,6 @@ class Class(object):
                 self._impl_only_param_cls_dep[name] = []
             self._impl_only_param_cls_dep[name].append(param_class)
         return self.add_param_class(subnamespace, param_class, name_alias)
-
 
     def add_impl_main(self,
                       impl_name: str,
@@ -1030,12 +1037,18 @@ class Class(object):
     def add_static_const(self, name: str, type: str, value: str):
         self._static_consts.append(StaticConst(name, type, value))
 
-    def add_enum_class(self, name: str, items: List[Tuple[str, int]], base_type: str = ""):
+    def add_enum_class(self,
+                       name: str,
+                       items: List[Tuple[str, int]],
+                       base_type: str = ""):
         """a limited enum for pccm. every value of enumerator must provided, must be int.
         """
         self._enum_classes.append(EnumClass(name, items, base_type))
 
-    def add_enum(self, name: str, items: List[Tuple[str, int]], base_type: str = ""):
+    def add_enum(self,
+                 name: str,
+                 items: List[Tuple[str, int]],
+                 base_type: str = ""):
         """a limited enum for pccm. every value of enumerator must provided, must be int.
         """
         self._enum_classes.append(EnumClass(name, items, base_type, False))
@@ -1073,7 +1086,7 @@ class Class(object):
         """TODO find a better way to check invalid param class inherit
         """
         if type(self) is Class:
-            return None 
+            return None
         pccm_base_types = []  # List[Type[Class]]
         for base in type(self).__bases__:
             if issubclass(base, Class):
@@ -1163,8 +1176,8 @@ class Class(object):
             # TODO better way to get alias name
             parent_class_alias = parent.__name__
         cdef = CodeSectionClassDef(cu_name, dep_alias, self._code_before_class,
-                                   self._code_after_class, ext_decls,
-                                   ec_strs, typedef_strs, sc_strs, member_func_decls,
+                                   self._code_after_class, ext_decls, ec_strs,
+                                   typedef_strs, sc_strs, member_func_decls,
                                    member_def_strs, parent_class_alias)
         return cdef
 
@@ -1308,7 +1321,7 @@ class CodeSectionClassDef(CodeSection):
     def to_block(self) -> Block:
         code_before_cls = self.dep_alias + self.code_before + generate_code_list(
             self.external_funcs, 0, 2)
-        class_contents = self.typedefs + self.members + self.enum_classes + self.static_consts + self.functions
+        class_contents = self.typedefs + self.enum_classes + self.static_consts + self.members + self.functions
         if self.parent_class is not None:
             prefix = code_before_cls + [
                 "struct {class_name} : public {parent} {{".format(
@@ -1332,7 +1345,8 @@ class CodeSectionImpl(CodeSection):
     }
     """
     def __init__(self, namespace: str, class_typedefs: List[str],
-                 includes: List[str], func_impls: List[str], code_after_includes: List[str]):
+                 includes: List[str], func_impls: List[str],
+                 code_after_includes: List[str]):
         self.namespace = namespace
         self.includes = includes
         self.class_typedefs = class_typedefs
@@ -1346,8 +1360,8 @@ class CodeSectionImpl(CodeSection):
         ns_before = "\n".join(namespace_before)
         ns_after = "\n".join(namespace_after)
         block = Block("", [
-            include_str, *self.code_after_includes, ns_before, *self.class_typedefs, *self.func_impls,
-            ns_after
+            include_str, *self.code_after_includes, ns_before,
+            *self.class_typedefs, *self.func_impls, ns_after
         ],
                       indent=0)
         return "\n".join(generate_code(block, 0, 2))
@@ -1505,7 +1519,7 @@ class CodeGenerator(object):
                           Class) and not isinstance(cu, ParameterizedClass):
                 cu_type = type(cu)
                 if cu_type is Class:
-                    msg =  "you must set class name if you create class from scratch."
+                    msg = "you must set class name if you create class from scratch."
                     assert cu._user_provided_class_name is not None, msg
                 cu_type_to_cu[cu_type] = cu
                 if cu.namespace is None:
@@ -1546,8 +1560,8 @@ class CodeGenerator(object):
                         cur_type_trace_copy = cur_type_trace.copy()
                         cur_type_trace_copy.add(type(v))
                         stack.append((v, cur_type_trace_copy))
-                    cur_cu._function_decls.extend(self.cached_extract_classunit_methods(
-                        cur_cu))
+                    cur_cu._function_decls.extend(
+                        self.cached_extract_classunit_methods(cur_cu))
                     cur_cu._assign_overload_flag_to_func_decls()
                     cur_cu.graph_inited = True
                 else:
@@ -1592,12 +1606,15 @@ class CodeGenerator(object):
     def get_code_units(self) -> List[Class]:
         return self.code_units
 
-    def code_generation(self, cus: List[Union[Class, ParameterizedClass]], include_root : Optional[Path] = None):
+    def code_generation(self,
+                        cus: List[Union[Class, ParameterizedClass]],
+                        include_root: Optional[Path] = None):
         header_dict = OrderedDict()  # type: Dict[str, CodeSectionHeader]
         impl_dict = OrderedDict()  # type: Dict[str, CodeSectionImpl]
         header_to_impls = OrderedDict()  # type: Dict[str, List[str]]
         for cu in cus:
-            cu_header_dict, cu_impls_dict = self.generate_cu_code_v2(cu, include_root=include_root)
+            cu_header_dict, cu_impls_dict = self.generate_cu_code_v2(
+                cu, include_root=include_root)
             header_key = list(cu_header_dict.keys())[0]
             header_to_impls[header_key] = list(cu_impls_dict.keys())
             header_dict.update(cu_header_dict)
@@ -1635,7 +1652,10 @@ class CodeGenerator(object):
             all_paths.append(code_path)
         return all_paths
 
-    def generate_cu_code_v2(self, cu: Class, one_impl_one_file: bool = True, include_root : Optional[Path] = None ):
+    def generate_cu_code_v2(self,
+                            cu: Class,
+                            one_impl_one_file: bool = True,
+                            include_root: Optional[Path] = None):
         """
         TODO multiple impl one file
         generate_code will put all Class in cus to one header file and same namespace.
@@ -1647,7 +1667,7 @@ class CodeGenerator(object):
         code_cdefs = []  # type: List[CodeSectionClassDef]
         cu_name = cu.class_name
         assert cu.namespace is not None, cu.class_name
-        assert cu.include_file is not None 
+        assert cu.include_file is not None
         includes = []  # type: List[str]
         ext_functions_decl = []  # type: List[str]
         member_functions_index_decl = []  # type: List[Tuple[int, str]]
@@ -1675,18 +1695,16 @@ class CodeGenerator(object):
             impl_file_name = meta.impl_loc
             if not impl_file_name:
                 if isinstance(meta, DestructorMeta):
-                    impl_file_name = "{}_dtor_{}".format(
-                        cu_name, func_name)
+                    impl_file_name = "{}_dtor_{}".format(cu_name, func_name)
                 else:
                     impl_file_name = "{}_{}".format(cu_name, func_name)
             impl_file_name = "{}/{}/{}{}".format(
-                cu.namespace.replace(".", "/"), cu.class_name,
-                impl_file_name, meta.impl_file_suffix)
+                cu.namespace.replace(".", "/"), cu.class_name, impl_file_name,
+                meta.impl_file_suffix)
             if impl_file_name not in impl_dict_cls:
                 impl_dict_cls[impl_file_name] = []
             if impl_file_name not in impl_dict_code_after_inc:
                 impl_dict_code_after_inc[impl_file_name] = []
-
 
             func_decl_str = code_obj.get_sig(func_name, meta)
             bound_name = cu_name
@@ -1710,7 +1728,8 @@ class CodeGenerator(object):
             if not header_only:
                 impl_dict_cls[impl_file_name].append(func_impl_str)
                 if code_obj.code_after_include is not None:
-                    impl_dict_code_after_inc[impl_file_name].append(code_obj.code_after_include)
+                    impl_dict_code_after_inc[impl_file_name].append(
+                        code_obj.code_after_include)
             else:
                 assert code_obj.code_after_include is None, "header only don't support code after include."
             # handle impl-only dependency
@@ -1725,8 +1744,7 @@ class CodeGenerator(object):
                             udep_type = type(udep)
                             for cls_dep in cls_deps:
                                 if udep_type is cls_dep:
-                                    impl_only_deps[impl_file_name].append(
-                                        udep)
+                                    impl_only_deps[impl_file_name].append(udep)
             for impl_func_name, pcls_deps in cu._impl_only_param_cls_dep.items(
             ):
                 if impl_func_name == meta.name:
@@ -1734,8 +1752,7 @@ class CodeGenerator(object):
                         if isinstance(udep, ParameterizedClass):
                             for pcls_dep in pcls_deps:
                                 if udep is pcls_dep:
-                                    impl_only_deps[impl_file_name].append(
-                                        udep)
+                                    impl_only_deps[impl_file_name].append(udep)
         cls_funcs_with_index = (member_functions_index_decl +
                                 ctors_index_decl +
                                 static_functions_index_decl + dtors_index_decl)
@@ -1751,7 +1768,9 @@ class CodeGenerator(object):
         for k, v in impl_dict_cls.items():
             if v:
                 if include_root is not None:
-                    impl_includes = ["#include <{}>".format(include_root / cu.include_file)]
+                    impl_includes = [
+                        "#include <{}>".format(include_root / cu.include_file)
+                    ]
                 else:
                     impl_includes = ["#include <{}>".format(cu.include_file)]
                 impl_only_cls_alias = []
@@ -1763,7 +1782,8 @@ class CodeGenerator(object):
                         impl_only_cls_alias.append(dep_stmt)
                 code_impl = CodeSectionImpl(cu.namespace,
                                             cu_typedefs + impl_only_cls_alias,
-                                            impl_includes, v, impl_dict_code_after_inc[k])
+                                            impl_includes, v,
+                                            impl_dict_code_after_inc[k])
                 impl_dict[k] = code_impl
         for k, (suffix, mains) in cu._impl_mains.items():
             impl_key = "{}/{}{}".format(cu.namespace.replace(".", "/"), k,

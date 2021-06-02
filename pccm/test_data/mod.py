@@ -1,4 +1,5 @@
 import enum
+
 import pccm
 from pccm.test_data import PTest1, Test2
 
@@ -12,7 +13,10 @@ class Test3(pccm.Class):
                         "int",
                         pyanno="int",
                         mw_metas=[pccm.pybind.Pybind11PropMeta()])
-        self.add_member("private_prop_", "int", "0", doc="a private prop. \ndetails.")
+        self.add_member("private_prop_",
+                        "int",
+                        "0",
+                        doc="a private prop. \ndetails.")
 
     @pccm.pybind.mark
     @pccm.member_function(inline=True)
@@ -32,15 +36,15 @@ class Test3(pccm.Class):
     @pccm.member_function
     def prop_getter(self):
         code = pccm.FunctionCode("return private_prop_ * private_prop_;")
-        return code.ret("int") 
-
+        return code.ret("int")
 
     @pccm.pybind.mark_prop_setter(prop_name="square_prop")
     @pccm.member_function
     def prop_setter(self):
         code = pccm.FunctionCode("private_prop_ = val;")
         code.arg("val", "int")
-        return code 
+        return code
+
 
 class Test4(Test3):
     def __init__(self):
@@ -79,8 +83,10 @@ class PbTestVirtual(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
         self.add_pybind_member("a", "int", "0")
-        self.add_enum_class("EnumClassExample", [("kValue1", 1), ("kValue2", 2)])
+        self.add_enum_class("EnumClassExample", [("kValue1", 1),
+                                                 ("kValue2", 2)])
         self.add_enum("EnumExample", [("kValue1", 1), ("kValue2", 2)])
+        self.add_member("bbb", "EnumClassExample", "EnumClassExample::kValue1")
 
     @pccm.pybind.mark(virtual=True)
     @pccm.member_function(virtual=True)
@@ -106,5 +112,3 @@ class PbTestVirtual(pccm.Class, pccm.pybind.PybindClassMixin):
         code = pccm.FunctionCode("return func_2(a, b);").ret("int")
         code.arg("a,b", "int")
         return code
-
-

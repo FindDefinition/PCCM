@@ -5,7 +5,7 @@ import ccimport
 
 from pccm import builder, core
 from pccm.middlewares import pybind
-from pccm.test_data.mod import Test3, Test4, PbTestVirtual
+from pccm.test_data.mod import PbTestVirtual, Test3, Test4
 
 
 def test_core():
@@ -19,7 +19,9 @@ def test_core():
     cu_scratch.add_func_decl(core.FunctionDecl(scratch_meta, scratch_code_obj))
     cu_scratch.namespace = "scratch"
     cu_scratch.class_name = "ScratchClass"
-    lib = builder.build_pybind([cu_scratch, cu, PbTestVirtual()], Path(__file__).parent / "wtf2")
+    lib = builder.build_pybind(
+        [cu_scratch, cu, PbTestVirtual()],
+        Path(__file__).parent / "wtf2")
     assert lib.pccm.test_data.mod.Test4.add_static(1, 2) == 3
     t3 = lib.pccm.test_data.mod.Test3()
     t3.square_prop = 5
@@ -29,6 +31,7 @@ def test_core():
         def func_0(self):
             self.a = 42
             return 0
+
         def func_2(self, a: int, b: int):
             self.a = a + b
             return 0

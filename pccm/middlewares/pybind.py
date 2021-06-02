@@ -1,15 +1,15 @@
 import ast
 from collections import OrderedDict
 from enum import Enum
-from typing import Dict, List, Optional, Union, Set, Callable
+from typing import Callable, Dict, List, Optional, Set, Union
 
 from ccimport import compat
 
-from pccm.core import (Class, ConstructorMeta, ExternalFunctionMeta,
-                       FunctionDecl, ManualClass, ManualClassGenerator, Member,
+from pccm.core import (Class, CodeSectionClassDef, ConstructorMeta, EnumClass,
+                       ExternalFunctionMeta, FunctionCode, FunctionDecl,
+                       ManualClass, ManualClassGenerator, Member,
                        MemberFunctionMeta, MiddlewareMeta, ParameterizedClass,
-                       StaticMemberFunctionMeta, CodeSectionClassDef,
-                       FunctionCode, EnumClass)
+                       StaticMemberFunctionMeta)
 from pccm.core.buildmeta import _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 from pccm.core.markers import middleware_decorator
@@ -576,13 +576,13 @@ def _generate_python_interface_class(cls_name: str,
 
         prefix = "class {}:".format(ec.name)
         for key, value in ec.items:
-            ec_items.append("{k} = {ectype}({v}) # type: {ectype}".format(k=key, v=value, ectype=enum_type))
+            ec_items.append("{k} = {ectype}({v}) # type: {ectype}".format(
+                k=key, v=value, ectype=enum_type))
         def_items = ec_items.copy()
         def_items.append("@staticmethod")
         def_items.append(
-            "def __members__() -> Dict[str, {}]: ...".format(
-                enum_type))
-        
+            "def __members__() -> Dict[str, {}]: ...".format(enum_type))
+
         decl_codes.append(Block(prefix, def_items))
         if not ec.scoped:
             decl_codes.extend(ec_items)

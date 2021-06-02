@@ -30,7 +30,7 @@ def build_pybind(cus: List[Class],
                  suffix_to_compiler: Optional[Dict[str, List[str]]] = None,
                  disable_pch: bool = False,
                  verbose=False):
-    
+
     mod_name = Path(out_path).stem
     if build_dir is None:
         build_dir = Path(out_path).parent / "build"
@@ -56,11 +56,12 @@ def build_pybind(cus: List[Class],
     # build graph for middleware only. so we can't apply middleware again.
     cg.build_graph(pb.get_code_units(), namespace_root, run_middleware=False)
     header_dict, impl_dict, header_to_impls = cg.code_generation(user_cus)
-    pch_to_sources = {} # type: Dict[Path, List[Path]]
-    pch_to_include = {} # type: Dict[Path, str]
+    pch_to_sources = {}  # type: Dict[Path, List[Path]]
+    pch_to_include = {}  # type: Dict[Path, str]
     if not disable_pch:
         for header, impls in header_to_impls.items():
-            pch_to_sources[HEADER_ROOT / header] = [SRC_ROOT / p for p in impls]
+            pch_to_sources[HEADER_ROOT /
+                           header] = [SRC_ROOT / p for p in impls]
             pch_to_include[HEADER_ROOT / header] = header
     includes.append(HEADER_ROOT)
     extern_build_meta = BuildMeta(includes, libpaths, libraries,
@@ -72,7 +73,8 @@ def build_pybind(cus: List[Class],
 
     cg.code_written(HEADER_ROOT, header_dict, code_fmt)
     paths = cg.code_written(SRC_ROOT, impl_dict, code_fmt)
-    header_dict, impl_dict, header_to_impls = cg.code_generation(pb.get_code_units())
+    header_dict, impl_dict, header_to_impls = cg.code_generation(
+        pb.get_code_units())
     cg.code_written(HEADER_ROOT, header_dict, code_fmt)
     paths += cg.code_written(SRC_ROOT, impl_dict, code_fmt)
     pyi = pb.generate_python_interface()
