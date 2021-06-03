@@ -123,6 +123,21 @@ def _anno_parser(node: ast.AST, imports: List[str]) -> str:
         raise ValueError(msg)
 
 
+class TemplateTypeStmt(object):
+    def __init__(self, name: str, args: List[Union[str, "TemplateTypeStmt"]]):
+        self.name = name
+        self.args = args
+
+
+def _simple_template_type_parser(stmt: str, start: int, end: int):
+    # find '<'
+    assert stmt[end - 1] == ">"
+    left = -1
+    for i in range(start, end):
+        pass
+    pass
+
+
 def python_anno_parser(anno_str: str):
     tree = ast.parse(anno_str)
     imports = []  # type: List[str]
@@ -318,7 +333,6 @@ class PybindClassMixin:
 def _postprocess_class(cls_name: str, cls_namespace: str, submod: str,
                        decls: List[Union[PybindMethodDecl, PybindPropDecl]],
                        enum_classes: List[EnumClass]):
-    # TODO handle c++ overload
     has_virtual = False
     vblock = None  # Optional[Block]
     virtual_decls = []  # type: List[PybindMethodDecl]
@@ -654,108 +668,6 @@ class Pybind11SingleClassHandler(ManualClass):
         self.built = True
 
 
-class Pybind11ClassHandler(ManualClass):
-    # TODO split pybind defs to multiple file for faster compilation.
-    # TODO handle inherit
-    def __init__(self, module_name: str, file_suffix: str = ".cc"):
-        super().__init__()
-        self.ns_to_cls_to_func_prop_decls = OrderedDict(
-        )  # type: Dict[str, Dict[str, List[Union[PybindMethodDecl, PybindPropDecl]]]]
-        self.module_name = module_name
-        self.add_include("pybind11/stl.h")
-        self.add_include("pybind11/pybind11.h")
-        self.add_include("pybind11/numpy.h")
-        self.file_suffix = file_suffix
-        self.built = False
-
-    def handle_function_decl(self, cu: Class, func_decl: FunctionDecl,
-                             mw_meta: Pybind11MethodMeta):
-        assert cu.namespace is not None
-        if cu.namespace not in self.ns_to_cls_to_func_prop_decls:
-            self.ns_to_cls_to_func_prop_decls[cu.namespace] = OrderedDict()
-        cls_to_func_decls = self.ns_to_cls_to_func_prop_decls[cu.namespace]
-        if cu.class_name not in cls_to_func_decls:
-            cls_to_func_decls[cu.class_name] = []
-        cls_to_func_decls[cu.class_name].append(
-            PybindMethodDecl(func_decl, cu.namespace, cu.class_name, mw_meta))
-
-    def handle_member(self, cu: Class, member_decl: Member,
-                      mw_meta: Pybind11PropMeta):
-        assert cu.namespace is not None
-        if cu.namespace not in self.ns_to_cls_to_func_prop_decls:
-            self.ns_to_cls_to_func_prop_decls[cu.namespace] = OrderedDict()
-        cls_to_prop_decls = self.ns_to_cls_to_func_prop_decls[cu.namespace]
-        if cu.class_name not in cls_to_prop_decls:
-            cls_to_prop_decls[cu.class_name] = []
-        cls_to_prop_decls[cu.class_name].append(
-            PybindPropDecl(member_decl, cu.namespace, cu.class_name, mw_meta))
-
-    def postprocess(self):
-        # TODO handle overload
-        # TODO handle inherit
-        if self.built:
-            return
-        submodules = OrderedDict()  # type: Dict[str, str]
-        sub_defs = []  # type: List[str]
-        for ns in self.ns_to_cls_to_func_prop_decls.keys():
-            ns_parts = ns.split(".")
-            for i in range(1, len(ns_parts) + 1):
-                sub_name = "_".join(ns_parts[:i])
-                sub_ns = ".".join(ns_parts[:i])
-                if i == 1:
-                    parent_name = "m"
-                else:
-                    parent_name = "m_{}".format("_".join(ns_parts[:i - 1]))
-                if sub_ns not in submodules:
-                    stmt = "pybind11::module_ m_{} = {}.def_submodule(\"{}\");".format(
-                        sub_name, parent_name, ns_parts[i - 1])
-                    sub_defs.append(stmt)
-                    submodules[sub_ns] = "m_{}".format(sub_name)
-        class_defs = []  # type: List[Block]
-        virtual_class_defs = []  # type: List[Block]
-        for ns, cls_to_decl in self.ns_to_cls_to_func_prop_decls.items():
-            for cls_name, decls in cls_to_decl.items():
-                submod = submodules[ns]
-                cls_def_block, vblock = _postprocess_class(
-                    cls_name, ns, submod, decls, [])
-                if vblock is not None:
-                    virtual_class_defs.append(vblock)
-                class_defs.append(cls_def_block)
-        code_block = Block("PYBIND11_MODULE({}, m){{".format(self.module_name),
-                           sub_defs + class_defs, "}")
-        code = generate_code_list([*virtual_class_defs, code_block], 0, 2)
-        self.add_impl_main("{}_pybind_main".format(self.module_name),
-                           "\n".join(code), self.file_suffix)
-        self.built = True
-
-    def generate_python_interface(self):
-        """
-        dep_imports
-        class xxx:
-            prop decls
-            methods (overloaded methods)
-        TODO handle c++ operators
-        TODO better code
-        TODO auto generate STL annotations
-        TODO insert docstring if exists
-        """
-        init_import = "from typing import overload, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union"
-        init_pccm_import = "from pccm.stubs import EnumValue, EnumClassValue"
-        ns_to_interface = OrderedDict()  # type: Dict[str, str]
-        for ns, cls_to_decl in self.ns_to_cls_to_func_prop_decls.items():
-            imports = [init_import, init_pccm_import]  # type: List[str]
-            ns_cls_blocks = []  # type: List[Block]
-            for cls_name, decls in cls_to_decl.items():
-                class_block, cls_imports = _generate_python_interface_class(
-                    cls_name, decls, [])
-                imports.extend(cls_imports)
-                ns_cls_blocks.append(class_block)
-            imports = _unique_list_keep_order(imports)
-            ns_to_interface[ns] = "\n".join(
-                generate_code_list(imports + ns_cls_blocks, 0, 4))
-        return ns_to_interface
-
-
 class Pybind11SplitMain(ParameterizedClass):
     # TODO handle inherit
     def __init__(self, module_name: str, file_suffix: str = ".cc"):
@@ -850,28 +762,6 @@ class Pybind11SplitMain(ParameterizedClass):
             ns_to_interface[k] = "\n".join(
                 generate_code_list(imports + interfaces, 0, 4))
         return ns_to_interface
-
-
-class Pybind11(ManualClassGenerator):
-    def __init__(self,
-                 module_name: str,
-                 subnamespace: str,
-                 file_suffix: str = ".cc"):
-        super().__init__(subnamespace)
-        self.module_name = module_name
-        self.singleton = Pybind11ClassHandler(module_name, file_suffix)
-        self.singleton.graph_inited = True
-
-    def create_manual_class(self, cu: Class) -> ManualClass:
-        self.singleton._unified_deps.append(cu)
-        return self.singleton
-
-    def get_code_units(self) -> List[Class]:
-        self.singleton.postprocess()
-        return [self.singleton]
-
-    def generate_python_interface(self):
-        return self.singleton.generate_python_interface()
 
 
 class Pybind11SplitImpl(ManualClassGenerator):

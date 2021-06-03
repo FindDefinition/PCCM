@@ -15,6 +15,10 @@ class EnumClassValue(object):
     def value(self):
         return self.__value
 
+    @property
+    def name(self) -> str:
+        ...
+
 
 class EnumValue(EnumClassValue):
     def __eq__(self, other: Optional["EnumValue"]) -> bool:

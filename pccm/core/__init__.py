@@ -280,6 +280,7 @@ class EnumClass(object):
                  base_type: str = "",
                  scoped: bool = True):
         self.name = name
+        assert len(items) > 0, "enum can't be empty."
         self.items = items
         self.base_type = base_type  # type: str
         self.scoped = scoped
@@ -292,8 +293,12 @@ class EnumClass(object):
         if self.base_type:
             prefix = "enum {} {}: {} {{".format(scoped_str, self.name,
                                                 self.base_type)
-        items = []  # type: List[str]
+        items = []  # type: List[Union[Block, str]]
+        unique_key_set = set()  # type: Set[str]
         for k, v in self.items:
+            if k in unique_key_set:
+                raise ValueError("your enum have duplicate key {}".format(k))
+            unique_key_set.add(k)
             assert isinstance(v, int), "v must be int."
             items.append("{} = {},".format(k, v))
         block = Block(prefix, items, "};")
@@ -391,9 +396,11 @@ class TemplateNonTypeArgument(object):
 class FunctionCode(object):
     def __init__(self,
                  code: str = "",
-                 arguments: List[Argument] = (),
+                 arguments: Optional[List[Argument]] = None,
                  return_type: str = "void",
                  ctor_inits: Optional[List[Tuple[str, str]]] = None):
+        if arguments is None:
+            arguments = []
         self.arguments = list(arguments)  # type: List[Argument]
         self.return_type = return_type
         if ctor_inits is None:
@@ -609,7 +616,9 @@ class FunctionCode(object):
                                 post_attrs=post_attrs_str)
         if pre_attrs_str:
             prefix_fmt = pre_attrs_str + " " + prefix_fmt
-        block = Block(template_fmt + prefix_fmt, self._blocks, "}")
+        blocks = []  # List[Union[Block, str]]
+        blocks.extend(self._blocks)
+        block = Block(template_fmt + prefix_fmt, blocks, "}")
         return block
 
     def arg(self,
@@ -819,7 +828,7 @@ class Class(object):
 
         self._this_type_to_deps = {
             self._this_cls_type: []
-        }  # type: Dict[Optional[Type[Class]], Type[Class]]
+        }  # type: Dict[Optional[Type[Class]], List[Type[Class]]]
 
         self._impl_mains = OrderedDict(
         )  # type: Dict[str, Tuple[str, List[str]]]
@@ -1041,7 +1050,7 @@ class Class(object):
                        name: str,
                        items: List[Tuple[str, int]],
                        base_type: str = ""):
-        """a limited enum for pccm. every value of enumerator must provided, must be int.
+        """a limited enum class for pccm. every value of enumerator must provided, must be int.
         """
         self._enum_classes.append(EnumClass(name, items, base_type))
 
@@ -1271,7 +1280,8 @@ class CodeSectionHeader(CodeSection):
             self.namespace)
         ns_before = "\n".join(namespace_before)
         ns_after = "\n".join(namespace_after)
-        class_strs = [c.to_block() for c in self.class_defs]
+        class_strs = [c.to_block() for c in self.class_defs
+                      ]  # type: List[Union[Block, str]]
         # class_strs = list(filter(len, class_strs))
         block = Block("\n".join(["#pragma once"] + self.includes +
                                 self.global_codes + [ns_before]),
@@ -1460,7 +1470,10 @@ class CodeGenerator(object):
         self.verbose = verbose
 
         self._get_members_cache = {}  # type: Dict[Type[Class], Any]
-        self._get_decls_cache = {}  # type: Dict[Type[Class], Any]
+        self._get_decls_cache = {
+        }  # type: Dict[Union[Type[Class], ParameterizedClass], Any]
+
+        self.cu_type_to_cu = {}  # type: Dict[Type[Class], Class]
 
     def _apply_middleware_to_cus(self, uid_to_cu: Dict[str, Class]):
         # manual middlewares
@@ -1512,8 +1525,7 @@ class CodeGenerator(object):
         # 1. build dependency graph
 
         all_cus = set()  # type: Set[Class]
-        cu_type_to_cu = {}  # type: Dict[Type[Class], Class]
-
+        cu_type_to_cu = self.cu_type_to_cu
         for cu in cus:
             if isinstance(cu,
                           Class) and not isinstance(cu, ParameterizedClass):
@@ -1534,7 +1546,6 @@ class CodeGenerator(object):
                 # ns should be set below
                 assert cur_ns is not None
                 uid_to_cu[cur_cu.uid] = cur_cu
-                cur_cu_type = type(cur_cu)
                 all_cus.add(cur_cu_type)
                 # construct unified dependency and assign namespace for Class
                 if not cur_cu.graph_inited:
@@ -1584,9 +1595,12 @@ class CodeGenerator(object):
 
     def cached_extract_classunit_methods(self, cu: Class):
         cu_type = type(cu)
-        if cu_type not in self._get_decls_cache:
-            self._get_decls_cache[cu_type] = self.extract_classunit_methods(cu)
-        return self._get_decls_cache[cu_type]
+        key = cu_type
+        if isinstance(cu, ParameterizedClass):
+            key = cu
+        if key not in self._get_decls_cache:
+            self._get_decls_cache[key] = self.extract_classunit_methods(cu)
+        return self._get_decls_cache[key]
 
     def extract_classunit_methods(self, cu: Class):
         methods = []  # type: List[FunctionDecl]
