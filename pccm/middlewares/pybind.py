@@ -124,18 +124,76 @@ def _anno_parser(node: ast.AST, imports: List[str]) -> str:
 
 
 class TemplateTypeStmt(object):
-    def __init__(self, name: str, args: List[Union[str, "TemplateTypeStmt"]]):
+    NameToHandler = {
+        "int": lambda args: "int",
+        "int8_t": lambda args: "int",
+        "int16_t": lambda args: "int",
+        "int32_t": lambda args: "int",
+        "int64_t": lambda args: "int",
+        "uint8_t": lambda args: "int",
+        "uint16_t": lambda args: "int",
+        "uint32_t": lambda args: "int",
+        "uint64_t": lambda args: "int",
+        "unsigned": lambda args: "int",
+        "long": lambda args: "int",
+        "short": lambda args: "int",
+        "float": lambda args: "float",
+        "double": lambda args: "float",
+        "unsigned long": lambda args: "int",
+        "unsigned int": lambda args: "int",
+        "unsigned long long": lambda args: "int",
+        "bool": lambda args: "bool",
+        "std::string": lambda args: "str",
+        "void": lambda args: "None",
+        "std::array": lambda args: "List[{}]".format(args[0].to_pyanno()),
+        "tv::array": lambda args: "List[{}]".format(args[0].to_pyanno()),
+        "std::tuple": lambda args: "Tuple[{}]".format(", ".join(a.to_pyanno() for a in args)),
+        "std::vector": lambda args: "List[{}]".format(args[0].to_pyanno()),
+        "std::list": lambda args: "List[{}]".format(args[0].to_pyanno()),
+        "std::map": lambda args: "Dict[{}]".format(", ".join(a.to_pyanno() for a in args[:2])),
+        "std::unordered_map": lambda args: "Dict[{}]".format(", ".join(a.to_pyanno() for a in args[:2])),
+        "std::set": lambda args: "Set[{}]".format(args[0].to_pyanno()),
+        "std::unordered_set": lambda args: "Set[{}]".format(args[0].to_pyanno()),
+    }
+    def __init__(self, name: str, args: List["TemplateTypeStmt"],
+                 not_template: bool, invalid: bool = False):
         self.name = name
         self.args = args
+        self.not_template = not_template
+        self.invalid = invalid
+
+    def to_pyanno(self) -> str:
+        if self.invalid:
+            return "Any"
+        if self.name in self.NameToHandler:
+            pyanno_generic = self.NameToHandler[self.name](self.args)
+        else:
+            pyanno_generic = "Any"
+        return pyanno_generic
 
 
-def _simple_template_type_parser(stmt: str, start: int, end: int):
-    # find '<'
-    assert stmt[end - 1] == ">"
-    left = -1
-    for i in range(start, end):
-        pass
-    pass
+def _simple_template_type_parser_recursive(stmt: str) -> TemplateTypeStmt:
+    if stmt[-1] != ">":
+        # type with no template param
+        return TemplateTypeStmt(stmt, [], True)
+    left = stmt.find("<")
+    if left == -1:
+        raise ValueError("invalid")
+    name = stmt[:left]
+    template_args_str = stmt[left + 1:-1]
+    template_args = template_args_str.split(",")
+    args = [_simple_template_type_parser_recursive(arg) for arg in template_args]
+    return TemplateTypeStmt(name, args, False)
+
+
+def _simple_template_type_parser(stmt: str) -> TemplateTypeStmt:
+    stmt = stmt.replace(" ", "")
+    if "\"" in stmt:
+        return TemplateTypeStmt("", [], False, True)
+    try:
+        return _simple_template_type_parser_recursive(stmt)
+    except ValueError:
+        return TemplateTypeStmt("", [], False, True)
 
 
 def python_anno_parser(anno_str: str):
@@ -443,14 +501,15 @@ def _extract_anno_default(user_anno: Optional[str],
     from_imports = []  # type: List[str]
     default = None
     if user_anno is None:
-        if type_str in _AUTO_ANNO_TYPES:
-            user_anno = _AUTO_ANNO_TYPES[type_str]
+        try_extract_pyanno_res = _simple_template_type_parser(type_str)
+        try_extract_pyanno = try_extract_pyanno_res.to_pyanno()
+        if try_extract_pyanno != "Any":
             if default is None:
                 if cpp_default is not None:
                     if type_str in _AUTO_ANNO_TYPES_DEFAULT_HANDLER:
                         handler = _AUTO_ANNO_TYPES_DEFAULT_HANDLER[type_str]
                         default = handler(cpp_default)
-            return user_anno, from_imports, default
+            return try_extract_pyanno, from_imports, default
     anno = None
     if user_anno is not None:
         user_anno_type_default = user_anno.split("=")
@@ -844,3 +903,4 @@ if __name__ == "__main__":
     # print(ast.parse)
     print(python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]"))
     # python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]")
+    print(_simple_template_type_parser("std::tuple<std::vector<int>, double>").to_pyanno())
