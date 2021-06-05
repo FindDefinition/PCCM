@@ -1,7 +1,7 @@
 import ast
 from collections import OrderedDict
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Callable, Dict, List, Optional, Set, Union, Tuple
 
 from ccimport import compat
 
@@ -154,17 +154,20 @@ class TemplateTypeStmt(object):
         "std::unordered_map": lambda args: "Dict[{}]".format(", ".join(a.to_pyanno() for a in args[:2])),
         "std::set": lambda args: "Set[{}]".format(args[0].to_pyanno()),
         "std::unordered_set": lambda args: "Set[{}]".format(args[0].to_pyanno()),
-    }
+    } # type: Dict[str, Callable[[List["TemplateTypeStmt"]], str]]
     def __init__(self, name: str, args: List["TemplateTypeStmt"],
-                 not_template: bool, invalid: bool = False):
+                 not_template: bool, invalid: bool = False, exist_anno: str = ""):
         self.name = name
         self.args = args
         self.not_template = not_template
         self.invalid = invalid
+        self.exist_anno = exist_anno
 
     def to_pyanno(self) -> str:
         if self.invalid:
             return "Any"
+        if self.exist_anno:
+            return self.exist_anno
         if self.name in self.NameToHandler:
             pyanno_generic = self.NameToHandler[self.name](self.args)
         else:
@@ -172,31 +175,71 @@ class TemplateTypeStmt(object):
         return pyanno_generic
 
 
-def _simple_template_type_parser_recursive(stmt: str) -> TemplateTypeStmt:
-    if stmt[-1] != ">":
+def _simple_template_type_parser_recursive(stmt: str, begin: int, end: int, bracket_pair: Dict[int, int], exist_annos: Dict[str, str]) -> TemplateTypeStmt:
+    if stmt[end - 1] != ">":
         # type with no template param
-        return TemplateTypeStmt(stmt, [], True)
-    left = stmt.find("<")
+        name = stmt[begin:end].strip()
+        if name in exist_annos:
+            return TemplateTypeStmt("", [], True, exist_anno=exist_annos[name])
+        return TemplateTypeStmt(name, [], True)
+    left = stmt.find("<", begin, end)
+
     if left == -1:
         raise ValueError("invalid")
-    name = stmt[:left]
-    template_args_str = stmt[left + 1:-1]
-    template_args = template_args_str.split(",")
-    args = [_simple_template_type_parser_recursive(arg) for arg in template_args]
+    name = stmt[begin:left].strip()
+    if name in exist_annos:
+        return TemplateTypeStmt("", [], True, exist_anno=exist_annos[name])
+    template_arg_ranges = [] # type: List[Tuple[int, int]]
+    pos = left + 1
+    arg_range_start = left + 1
+    while pos < end - 1:
+        if pos in bracket_pair:
+            pos = bracket_pair[pos] + 1
+        if pos >= end - 1:
+            break 
+        val = stmt[pos]
+        if val == ",":
+            template_arg_ranges.append((arg_range_start, pos))
+            arg_range_start = pos + 1
+        pos += 1
+    template_arg_ranges.append((arg_range_start, end - 1))
+    args = [_simple_template_type_parser_recursive(stmt, b, e, bracket_pair, exist_annos) for b, e in template_arg_ranges]
     return TemplateTypeStmt(name, args, False)
 
 
-def _simple_template_type_parser(stmt: str) -> TemplateTypeStmt:
-    stmt = stmt.replace(" ", "")
+def _simple_template_type_parser(stmt: str, exist_annos: Dict[str, str]) -> TemplateTypeStmt:
+    # TODO parse const/ref
+    # TODO we can't remove whitespaces
+    # stmt = stmt.replace(" ", "")
+    invalid = TemplateTypeStmt("", [], False, True)
+    bracket_stack = [] # type: List[Tuple[str, int]]
+    N = len(stmt)
+    pos = 0
+    bracket_pair = {} # type: Dict[int, int]
+    while pos < N:
+        val = stmt[pos]
+        if val  == "<":
+            bracket_stack.append((val, pos))
+        elif val == ">":
+            if not bracket_stack:
+                return invalid
+            start_val, start = bracket_stack.pop()
+            bracket_pair[start] = pos
+        pos += 1
+    if bracket_stack:
+        return invalid
     if "\"" in stmt:
-        return TemplateTypeStmt("", [], False, True)
+        res = TemplateTypeStmt("", [], False, True)
     try:
-        return _simple_template_type_parser_recursive(stmt)
+        res = _simple_template_type_parser_recursive(stmt, 0, len(stmt), bracket_pair, exist_annos)
     except ValueError:
-        return TemplateTypeStmt("", [], False, True)
-
+        res = TemplateTypeStmt("", [], False, True)
+    return res 
 
 def python_anno_parser(anno_str: str):
+    anno_str = anno_str.strip()
+    if anno_str == "None":
+        return "None", []
     tree = ast.parse(anno_str)
     imports = []  # type: List[str]
     refined_name = _anno_parser(tree, imports)
@@ -497,11 +540,12 @@ def _postprocess_class(cls_name: str, cls_namespace: str, submod: str,
 
 def _extract_anno_default(user_anno: Optional[str],
                           type_str: str,
-                          cpp_default: Optional[str] = None):
+                          exist_annos: Dict[str, str],
+                          cpp_default: Optional[str] = None,):
     from_imports = []  # type: List[str]
     default = None
     if user_anno is None:
-        try_extract_pyanno_res = _simple_template_type_parser(type_str)
+        try_extract_pyanno_res = _simple_template_type_parser(type_str, exist_annos)
         try_extract_pyanno = try_extract_pyanno_res.to_pyanno()
         if try_extract_pyanno != "Any":
             if default is None:
@@ -509,6 +553,7 @@ def _extract_anno_default(user_anno: Optional[str],
                     if type_str in _AUTO_ANNO_TYPES_DEFAULT_HANDLER:
                         handler = _AUTO_ANNO_TYPES_DEFAULT_HANDLER[type_str]
                         default = handler(cpp_default)
+            try_extract_pyanno, from_imports = python_anno_parser(try_extract_pyanno)
             return try_extract_pyanno, from_imports, default
     anno = None
     if user_anno is not None:
@@ -526,11 +571,51 @@ def _extract_anno_default(user_anno: Optional[str],
 
     return anno, from_imports, default
 
+def _collect_exist_annos(decls: List[Union[PybindMethodDecl,
+                                     PybindPropDecl]]):
+    # TODO handle annos for pccm classes
+    # we need to remove all annotations of pccm class
+
+    # split decl to method decl and prop decl
+    method_decls = []  # type: List[PybindMethodDecl]
+    prop_decls = []  # type: List[PybindPropDecl]
+    for decl in decls:
+        if isinstance(decl, PybindMethodDecl):
+            method_decls.append(decl)
+        else:
+            prop_decls.append(decl)
+    exist_annos = {} # type: Dict[str, str]
+    for prop_decl in prop_decls:
+        prop_type = prop_decl.decl.type_str
+        user_anno = prop_decl.decl.pyanno
+        if user_anno is not None:
+            user_anno_pair = user_anno.split("=")
+            user_anno_type = user_anno_pair[0].strip()
+            exist_annos[prop_type] = user_anno_type
+    
+    for pydecl in method_decls:
+        user_anno = pydecl.decl.code.ret_pyanno
+        ret_type = pydecl.decl.code.return_type
+        if user_anno is not None:
+            user_anno_pair = user_anno.split("=")
+            user_anno_type = user_anno_pair[0].strip()
+            exist_annos[ret_type] = user_anno_type
+
+        for arg in pydecl.decl.code.arguments:
+            user_anno = arg.pyanno
+            if user_anno is not None:
+                user_anno_pair = user_anno.split("=")
+                user_anno_type = user_anno_pair[0].strip()
+                exist_annos[arg.type_str] = user_anno_type
+
+    return exist_annos
+
 
 def _generate_python_interface_class(cls_name: str,
                                      decls: List[Union[PybindMethodDecl,
                                                        PybindPropDecl]],
-                                     enum_classes: List[EnumClass]):
+                                     enum_classes: List[EnumClass],
+                                     exist_annos: Dict[str, str]):
     """
     dep_imports
     class xxx:
@@ -558,7 +643,7 @@ def _generate_python_interface_class(cls_name: str,
         prop_type = prop_decl.decl.type_str
         user_anno = prop_decl.decl.pyanno
         anno, from_imports, default = _extract_anno_default(
-            user_anno, prop_type)
+            user_anno, prop_type, exist_annos)
         if anno is not None:
             prop_anno = anno
         imports.extend(from_imports)
@@ -590,7 +675,7 @@ def _generate_python_interface_class(cls_name: str,
             user_anno = pydecl.decl.code.ret_pyanno
             ret_type = pydecl.decl.code.return_type
             anno, from_imports, default = _extract_anno_default(
-                user_anno, ret_type)
+                user_anno, ret_type, exist_annos)
             if anno is not None:
                 if anno == cls_name:
                     anno = "\"{}\"".format(anno)
@@ -605,7 +690,7 @@ def _generate_python_interface_class(cls_name: str,
             for arg in pydecl.decl.code.arguments:
                 user_anno = arg.pyanno
                 user_anno, from_imports, default = _extract_anno_default(
-                    user_anno, arg.type_str, arg.default)
+                    user_anno, arg.type_str, exist_annos, arg.default)
                 default_str = ""
                 if default is not None:
                     default_str = " = {}".format(default)
@@ -798,7 +883,9 @@ class Pybind11SplitMain(ParameterizedClass):
         ns_to_interfaces = OrderedDict()  # type: Dict[str, List[Block]]
         ns_to_imports = OrderedDict()  # type: Dict[str, List[str]]
         ns_to_interface = OrderedDict()  # type: Dict[str, str]
-
+        exist_annos = {} # type: Dict[str, str]
+        for bind_cu in bind_cus:
+            exist_annos.update(_collect_exist_annos(bind_cu.get_pybind_decls()))
         for bind_cu in bind_cus:
             origin_cu = bind_cu.cu
             ns = origin_cu.namespace
@@ -808,7 +895,7 @@ class Pybind11SplitMain(ParameterizedClass):
                 ns_to_imports[ns] = []
             class_block, cls_imports = _generate_python_interface_class(
                 origin_cu.class_name, bind_cu.get_pybind_decls(),
-                origin_cu._enum_classes)
+                origin_cu._enum_classes, exist_annos)
             ns_to_imports[ns].extend(cls_imports)
             ns_to_interfaces[ns].append(class_block)
 
@@ -903,4 +990,4 @@ if __name__ == "__main__":
     # print(ast.parse)
     print(python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]"))
     # python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]")
-    print(_simple_template_type_parser("std::tuple<std::vector<int>, double>").to_pyanno())
+    print(_simple_template_type_parser("std::vector<std::tuple<int, ArrayPtr>>", {"ArrayPtr": "ArrayPtr"}).to_pyanno())
