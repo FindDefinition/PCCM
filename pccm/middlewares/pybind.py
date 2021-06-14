@@ -209,8 +209,6 @@ def _simple_template_type_parser_recursive(stmt: str, begin: int, end: int, brac
 
 def _simple_template_type_parser(stmt: str, exist_annos: Dict[str, str]) -> TemplateTypeStmt:
     # TODO parse const/ref
-    # TODO we can't remove whitespaces
-    # stmt = stmt.replace(" ", "")
     invalid = TemplateTypeStmt("", [], False, True)
     bracket_stack = [] # type: List[Tuple[str, int]]
     N = len(stmt)

@@ -1,9 +1,9 @@
 from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
-from pccm.constants import PCCM_FUNC_META_KEY, PCCM_MAGIC_STRING
+from pccm.constants import PCCM_FUNC_META_KEY, PCCM_CLASS_META_KEY
 from pccm.core import (ConstructorMeta, DestructorMeta, ExternalFunctionMeta,
                        FunctionMeta, MemberFunctionMeta, MiddlewareMeta,
-                       StaticMemberFunctionMeta)
+                       StaticMemberFunctionMeta, ClassMeta)
 
 PYTHON_OPERATORS_TO_CPP = {}
 
@@ -28,6 +28,24 @@ def meta_decorator(func=None, meta: Optional[FunctionMeta] = None):
     else:
         return wrapper
 
+def class_meta_decorator(cls=None, meta: Optional[ClassMeta] = None):
+    if meta is None:
+        raise ValueError("this shouldn't happen")
+
+    def wrapper(cls):
+        if meta.name is None:
+            meta.name = cls.__name__
+        if hasattr(cls, PCCM_CLASS_META_KEY):
+            raise ValueError(
+                "you can only use one meta decorator in a class.")
+        setattr(cls, PCCM_CLASS_META_KEY, meta)
+        return cls
+
+    if cls is not None:
+        return wrapper(cls)
+    else:
+        return wrapper
+
 
 def middleware_decorator(func=None, meta: Optional[MiddlewareMeta] = None):
     if meta is None:
@@ -38,6 +56,8 @@ def middleware_decorator(func=None, meta: Optional[MiddlewareMeta] = None):
             raise ValueError(
                 "you need to mark method before use middleware decorator.")
         func_meta = getattr(func, PCCM_FUNC_META_KEY)  # type: FunctionMeta
+        if meta is None:
+            raise ValueError("this shouldn't happen")
         func_meta.mw_metas.append(meta)
         return func
 
@@ -158,3 +178,10 @@ def destructor(func=None,
         impl_file_suffix=impl_file_suffix,
     )
     return meta_decorator(func, meta)
+
+def skip_inherit(cls=None):
+    """use this decorator when you want to add
+    python base class for param class.
+    """
+    meta = ClassMeta(skip_inherit=True)
+    return class_meta_decorator(cls, meta)

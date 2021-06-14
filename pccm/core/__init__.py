@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from ccimport import compat, loader
 
 from pccm.constants import (PCCM_FUNC_META_KEY, PCCM_INIT_DECORATOR_KEY,
-                            PCCM_MAGIC_STRING)
+                            PCCM_CLASS_META_KEY)
 from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 
@@ -66,6 +66,12 @@ class FunctionMeta(object):
     def is_header_only(self):
         return self.inline or self.constexpr or self.pure_virtual
 
+class ClassMeta(object):
+    def __init__(self,
+                 name: Optional[str] = None,
+                 skip_inherit: bool = False):
+        self.skip_inherit = skip_inherit
+        self.name = name
 
 def get_func_meta_except(func) -> FunctionMeta:
     if not hasattr(func, PCCM_FUNC_META_KEY):
@@ -73,6 +79,10 @@ def get_func_meta_except(func) -> FunctionMeta:
             "you need to mark method before use middleware decorator.")
     return getattr(func, PCCM_FUNC_META_KEY)
 
+def get_class_meta(cls: Type) -> Optional[ClassMeta]:
+    if not hasattr(cls, PCCM_CLASS_META_KEY):
+        return None 
+    return getattr(cls, PCCM_CLASS_META_KEY)
 
 class ConstructorMeta(FunctionMeta):
     def __init__(self,
@@ -1097,9 +1107,18 @@ class Class(object):
         if type(self) is Class:
             return None
         pccm_base_types = []  # List[Type[Class]]
-        for base in type(self).__bases__:
+        candidates = list(type(self).__bases__)
+        while candidates:
+            base = candidates.pop()
             if issubclass(base, Class):
-                pccm_base_types.append(base)
+                cls_meta = get_class_meta(base)
+                if cls_meta is None:
+                    pccm_base_types.append(base)
+                else:
+                    if cls_meta.skip_inherit:
+                        candidates.extend(base.__bases__)
+                    else:
+                        pccm_base_types.append(base)
         assert len(pccm_base_types) == 1, "you can only inherit one class."
         pccm_base = pccm_base_types[0]
         if pccm_base is not Class and base is not ParameterizedClass:
