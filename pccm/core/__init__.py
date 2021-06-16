@@ -1538,6 +1538,8 @@ class CodeGenerator(object):
         3. Class must be unique.
         """
         # assert self.built is False
+        if not cus:
+            return []
         for cu in cus:
             if isinstance(cu, ParameterizedClass):
                 assert cu.namespace is not None
