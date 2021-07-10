@@ -36,6 +36,7 @@ def _merge_compiler_to_flags(this: Dict[str, List[str]],
 
 
 class BuildMeta(object):
+    # TODO add private flags
     def __init__(self,
                  includes: Optional[List[Union[str, Path]]] = None,
                  libpaths: Optional[List[Union[str, Path]]] = None,

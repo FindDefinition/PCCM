@@ -1,7 +1,7 @@
 from typing import List, Optional
-
+import  enum 
 from pccm.core import (ConstructorMeta, DestructorMeta, ExternalFunctionMeta,
-                       MemberFunctionMeta, StaticMemberFunctionMeta, markers)
+                       MemberFunctionMeta, StaticMemberFunctionMeta, markers, FunctionCode)
 
 
 class CudaMemberFunctionMeta(MemberFunctionMeta):
@@ -189,3 +189,25 @@ def constructor(func=None,
         impl_file_suffix=impl_file_suffix,
     )
     return markers.meta_decorator(func, meta)
+
+class CudaPointerType(enum.Enum):
+    Global = "Global"
+    Smem = "Smem"
+    Register = "Register"
+
+class CudaPointer:
+    def __init__(self, name: str, ptr_type: CudaPointerType):
+        self.ptr_type = ptr_type 
+        self.name = name 
+
+class PTXCode(FunctionCode):
+    """TODO
+    A = code.global_ptr("", length=...)
+    B = code.smem_ptr("", length=...)
+    C = code.register_ptr("", length=...)
+    with code.asm_if("var_name"):
+        a, b, c = code.decl_reg("a, b, c")
+        code.asm_assign(A + offset_0, B + offset_1)
+        code.asm_assign(a, 0)
+    """
+    pass

@@ -121,7 +121,7 @@ def build_pybind(cus: List[Class],
 
 def build_library(cus: List[Class],
                  out_path: Union[str, Path],
-                middlewares: Optional[List[ManualClassGenerator]] = None,
+                 middlewares: Optional[List[ManualClassGenerator]] = None,
                  includes: Optional[List[Union[str, Path]]] = None,
                  libpaths: Optional[List[Union[str, Path]]] = None,
                  libraries: Optional[List[str]] = None,

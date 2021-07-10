@@ -14,30 +14,7 @@ from pccm.core.buildmeta import _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 from pccm.core.markers import middleware_decorator
 
-_AUTO_ANNO_TYPES = {
-    "int": "int",
-    "int8_t": "int",
-    "int16_t": "int",
-    "int32_t": "int",
-    "int64_t": "int",
-    "uint8_t": "int",
-    "uint16_t": "int",
-    "uint32_t": "int",
-    "uint64_t": "int",
-    "unsigned": "int",
-    "long": "int",
-    "short": "int",
-    "float": "float",
-    "double": "float",
-    "unsigned long": "int",
-    "unsigned int": "int",
-    "bool": "bool",
-    "std::string": "str",
-    "void": "None",
-}  # type: Dict[str, str]
-
 _IDENTITY_DEFAULT_HANDLER = lambda x: x
-
 
 def _bool_default_handler(cpp_value: str):
     if cpp_value == "true":
@@ -349,7 +326,11 @@ class PybindMethodDecl(object):
 
     def to_string(self) -> str:
         if isinstance(self.decl.meta, ConstructorMeta):
-            return ".def({}, {})".format(self.addr, ", ".join(self.args))
+            if self.args:
+                return ".def({}, {})".format(self.addr, ", ".join(self.args))
+            else:
+                return ".def({})".format(self.addr)
+
         def_stmt = "def"
         func_name = self.func_name
 

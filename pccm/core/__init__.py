@@ -466,7 +466,7 @@ class FunctionCode(object):
             yield
 
     @contextlib.contextmanager
-    def range_(self, var: str, stop: str, prefix: str = ""):
+    def range_(self, var: str, stop: Union[str, int], prefix: str = ""):
         with self.for_(
                 "int {i} = 0; {i} < {stop}; ++{i}".format(i=var, stop=stop),
                 prefix):
@@ -776,6 +776,8 @@ class Class(object):
         only works in python 3.6+, so we don't support inherit
         in python 3.5.
         """
+        if hasattr(cls, PCCM_CLASS_META_KEY):
+            setattr(cls, PCCM_CLASS_META_KEY, None)
         cls.__init__ = _init_decorator(cls.__init__, cls)
         return super().__init_subclass__()
 
