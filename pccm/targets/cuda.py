@@ -1,7 +1,8 @@
-from typing import List, Optional
+import contextlib
+from typing import List, Optional, Tuple
 import  enum 
 from pccm.core import (ConstructorMeta, DestructorMeta, ExternalFunctionMeta,
-                       MemberFunctionMeta, StaticMemberFunctionMeta, markers, FunctionCode)
+                       MemberFunctionMeta, StaticMemberFunctionMeta, markers, FunctionCode, Argument)
 
 
 class CudaMemberFunctionMeta(MemberFunctionMeta):
@@ -210,4 +211,13 @@ class PTXCode(FunctionCode):
         code.asm_assign(A + offset_0, B + offset_1)
         code.asm_assign(a, 0)
     """
-    pass
+    def __init__(self,
+                 code: str = "",
+                 arguments: Optional[List[Argument]] = None,
+                 return_type: str = "void",
+                 ctor_inits: Optional[List[Tuple[str, str]]] = None):
+        super().__init__(code, arguments, return_type, ctor_inits)
+
+    @contextlib.contextmanager
+    def asm_block(self):
+        yield None 

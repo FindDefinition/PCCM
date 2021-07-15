@@ -796,13 +796,12 @@ class Class(object):
         }  # type: Dict[Optional[Type[Class]], List[Member]]
 
         self._param_class = OrderedDict(
-        )  # type: OrderedDict[str, ParameterizedClass]
+        )  # type: OrderedDict[str, List[Tuple[ParameterizedClass, Optional[str]]]]
 
         self._this_type_to_param_class = {
             self._this_cls_type: OrderedDict()
         }  # type: Dict[Optional[Type[Class]], Dict[str, ParameterizedClass]]
 
-        self._param_class_alias = OrderedDict()  # type: OrderedDict[str, str]
 
         self._this_type_to_param_class_alias = {
             self._this_cls_type: OrderedDict()
@@ -974,26 +973,30 @@ class Class(object):
             msg = "can only add Param Class, but your {} is Class".format(
                 param_class.class_name)
             raise ValueError(msg)
-        assert subnamespace not in self._param_class
-        self._param_class[subnamespace] = param_class
-        if name_alias is not None:
-            self._param_class_alias[subnamespace] = name_alias
+        if subnamespace not in self._param_class:
+            self._param_class[subnamespace] = []
+        self._param_class[subnamespace].append((param_class, name_alias))
 
-    def add_impl_only_dependency(self, func,
+    def add_impl_only_dependency(self, 
+                                  func_or_list_funcs: Union[Callable,
+                                                            List[Callable]],
                                  *no_param_class_cls: Type["Class"]):
-        if inspect.ismethod(func):
-            func = func.__func__
-        func_meta = get_func_meta_except(func)
-        if func_meta.inline:
-            raise ValueError("inline function can't have impl-only dep")
-        name = func.__name__
-        if name not in self._impl_only_cls_dep:
-            self._impl_only_cls_dep[name] = []
-        for npcls in no_param_class_cls:
-            self._impl_only_cls_dep[name].append(npcls)
-            if npcls not in self._deps:
-                # only add once
-                self.add_dependency(npcls)
+        if not isinstance(func_or_list_funcs, list):
+            func_or_list_funcs = [func_or_list_funcs]
+        for func in func_or_list_funcs:
+            if inspect.ismethod(func):
+                func = func.__func__
+            func_meta = get_func_meta_except(func)
+            if func_meta.inline:
+                raise ValueError("inline function can't have impl-only dep")
+            name = func.__name__
+            if name not in self._impl_only_cls_dep:
+                self._impl_only_cls_dep[name] = []
+            for npcls in no_param_class_cls:
+                self._impl_only_cls_dep[name].append(npcls)
+                if npcls not in self._deps:
+                    # only add once
+                    self.add_dependency(npcls)
 
     def add_impl_only_param_class(self,
                                   func_or_list_funcs: Union[Callable,
@@ -1155,12 +1158,13 @@ class Class(object):
             ns_stmt = "using {} = {};".format(dep.class_name, name_with_ns)
             return ns_stmt
         else:
-            for k, v in self._param_class.items():
-                if dep is v and k in self._param_class_alias:
-                    name_with_ns = "::".join(dep.namespace.split("."))
-                    ns_stmt = "using {} = {}::{};".format(
-                        self._param_class_alias[k], name_with_ns, v.class_name)
-                    return ns_stmt
+            for k, pcls_alias_tuples in self._param_class.items():
+                for pcls, alias in pcls_alias_tuples:
+                    if dep is pcls and alias is not None:
+                        name_with_ns = "::".join(dep.namespace.split("."))
+                        ns_stmt = "using {} = {}::{};".format(
+                            alias, name_with_ns, pcls.class_name)
+                        return ns_stmt
         return None
 
     def get_dependency_aliases(self) -> List[str]:
@@ -1585,15 +1589,16 @@ class CodeGenerator(object):
                         cur_type_trace_copy.add(dep)
                         stack.append((cu_type_to_cu[dep], cur_type_trace_copy))
 
-                    for k, v in cur_cu._param_class.items():
-                        if type(v) in cur_type_trace:
-                            raise ValueError("cycle detected")
-                        if v.namespace is None:
-                            v.namespace = cur_ns + "." + k
-                        cur_cu._unified_deps.append(v)
-                        cur_type_trace_copy = cur_type_trace.copy()
-                        cur_type_trace_copy.add(type(v))
-                        stack.append((v, cur_type_trace_copy))
+                    for k, pcls_with_alias_tuples in cur_cu._param_class.items():
+                        for pcls, _ in pcls_with_alias_tuples:
+                            if type(pcls) in cur_type_trace:
+                                raise ValueError("cycle detected")
+                            if pcls.namespace is None:
+                                pcls.namespace = cur_ns + "." + k
+                            cur_cu._unified_deps.append(pcls)
+                            cur_type_trace_copy = cur_type_trace.copy()
+                            cur_type_trace_copy.add(type(pcls))
+                            stack.append((pcls, cur_type_trace_copy))
                     cur_cu._function_decls.extend(
                         self.cached_extract_classunit_methods(cur_cu))
                     cur_cu._assign_overload_flag_to_func_decls()
@@ -1782,6 +1787,7 @@ class CodeGenerator(object):
                             for cls_dep in cls_deps:
                                 if udep_type is cls_dep:
                                     impl_only_deps[impl_file_name].append(udep)
+
             for impl_func_name, pcls_deps in cu._impl_only_param_cls_dep.items(
             ):
                 if impl_func_name == meta.name:
