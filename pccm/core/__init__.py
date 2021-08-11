@@ -427,7 +427,7 @@ class FunctionCode(object):
         self.func_doc = None  # type: Optional[str]
         self.code_after_include = None  # type: Optional[str]
 
-        self._additional_pre_attrs: List[str] = []
+        self._additional_pre_attrs = [] # type: List[str]
 
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0
