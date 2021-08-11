@@ -8,7 +8,8 @@ from pccm.core import (Argument, ConstructorMeta, DestructorMeta,
                        ExternalFunctionMeta, FunctionCode, MemberFunctionMeta,
                        StaticMemberFunctionMeta, markers)
 
-from .cuda_ptx import CacheOpLd, CacheOpSt, PTXCode, PTXContext, RegDType
+if compat.Python3_6AndLater:
+    from .cuda_ptx import CacheOpLd, CacheOpSt, PTXCode, PTXContext, RegDType
 
 
 class CudaMemberFunctionMeta(MemberFunctionMeta):
