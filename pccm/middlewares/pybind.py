@@ -393,7 +393,7 @@ class PybindMethodDecl(object):
             addr = self.get_overload_addr()
         attrs = self.args.copy()
         if self.mw_meta.keep_alives is not None:
-            attrs.extend("pybind11::keep_alive<{}, {}>".format(x, y)
+            attrs.extend("pybind11::keep_alive<{}, {}>()".format(x, y)
                          for x, y in self.mw_meta.keep_alives)
         attrs.append(self.mw_meta.ret_policy.value)
         if self.mw_meta.call_guard is not None:

@@ -40,11 +40,12 @@ class ExposeMainHandler(ManualClass):
         if self.built:
             return
         ns = "::".join(self.main_cu.namespace.split("."))
-        code = f"""
-        {self.func_decl.code.return_type} main(){{
-            return {ns}::{self.main_cu.class_name}::{self.func_decl.meta.name}();
+        code = """
+        {} main(){{
+            return {}::{}::{}();
         }}
-        """
+        """.format(self.func_decl.code.return_type, ns,
+                   self.main_cu.class_name, self.func_decl.meta.name)
         self.add_impl_main("{}_main".format(self.main_cu.class_name), code,
                            self.file_suffix)
         self.built = True
