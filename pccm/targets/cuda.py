@@ -1,8 +1,14 @@
 import contextlib
-from typing import List, Optional, Tuple
-import  enum 
-from pccm.core import (ConstructorMeta, DestructorMeta, ExternalFunctionMeta,
-                       MemberFunctionMeta, StaticMemberFunctionMeta, markers, FunctionCode, Argument)
+import enum
+from typing import Dict, List, Optional, Set, Tuple, Union
+
+from ccimport import compat
+
+from pccm.core import (Argument, ConstructorMeta, DestructorMeta,
+                       ExternalFunctionMeta, FunctionCode, MemberFunctionMeta,
+                       StaticMemberFunctionMeta, markers)
+
+from .cuda_ptx import CacheOpLd, CacheOpSt, PTXCode, PTXContext, RegDType
 
 
 class CudaMemberFunctionMeta(MemberFunctionMeta):
@@ -36,10 +42,14 @@ def cuda_global_function(func=None,
                          macro_guard: Optional[str] = None,
                          impl_loc: str = "",
                          impl_file_suffix: str = ".cu",
+                         launch_bounds: Optional[Tuple[int, int]] = None,
                          name=None):
     if attrs is None:
         attrs = []
     cuda_global_attrs = attrs + ["__global__"]
+    if launch_bounds is not None:
+        cuda_global_attrs.append("__launch_bounds__({}, {})".format(
+            launch_bounds[0], launch_bounds[1]))
     return markers.external_function(func,
                                      name=name,
                                      inline=inline,
@@ -190,34 +200,3 @@ def constructor(func=None,
         impl_file_suffix=impl_file_suffix,
     )
     return markers.meta_decorator(func, meta)
-
-class CudaPointerType(enum.Enum):
-    Global = "Global"
-    Smem = "Smem"
-    Register = "Register"
-
-class CudaPointer:
-    def __init__(self, name: str, ptr_type: CudaPointerType):
-        self.ptr_type = ptr_type 
-        self.name = name 
-
-class PTXCode(FunctionCode):
-    """TODO
-    A = code.global_ptr("", length=...)
-    B = code.smem_ptr("", length=...)
-    C = code.register_ptr("", length=...)
-    with code.asm_if("var_name"):
-        a, b, c = code.decl_reg("a, b, c")
-        code.asm_assign(A + offset_0, B + offset_1)
-        code.asm_assign(a, 0)
-    """
-    def __init__(self,
-                 code: str = "",
-                 arguments: Optional[List[Argument]] = None,
-                 return_type: str = "void",
-                 ctor_inits: Optional[List[Tuple[str, str]]] = None):
-        super().__init__(code, arguments, return_type, ctor_inits)
-
-    @contextlib.contextmanager
-    def asm_block(self):
-        yield None 

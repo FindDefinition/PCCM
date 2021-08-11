@@ -1,7 +1,7 @@
 import ast
 from collections import OrderedDict
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Set, Union, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 from ccimport import compat
 
@@ -15,6 +15,7 @@ from pccm.core.codegen import Block, generate_code, generate_code_list
 from pccm.core.markers import middleware_decorator
 
 _IDENTITY_DEFAULT_HANDLER = lambda x: x
+
 
 def _bool_default_handler(cpp_value: str):
     if cpp_value == "true":
@@ -102,38 +103,75 @@ def _anno_parser(node: ast.AST, imports: List[str]) -> str:
 
 class TemplateTypeStmt(object):
     NameToHandler = {
-        "int": lambda args: "int",
-        "int8_t": lambda args: "int",
-        "int16_t": lambda args: "int",
-        "int32_t": lambda args: "int",
-        "int64_t": lambda args: "int",
-        "uint8_t": lambda args: "int",
-        "uint16_t": lambda args: "int",
-        "uint32_t": lambda args: "int",
-        "uint64_t": lambda args: "int",
-        "unsigned": lambda args: "int",
-        "long": lambda args: "int",
-        "short": lambda args: "int",
-        "float": lambda args: "float",
-        "double": lambda args: "float",
-        "unsigned long": lambda args: "int",
-        "unsigned int": lambda args: "int",
-        "unsigned long long": lambda args: "int",
-        "bool": lambda args: "bool",
-        "std::string": lambda args: "str",
-        "void": lambda args: "None",
-        "std::array": lambda args: "List[{}]".format(args[0].to_pyanno()),
-        "tv::array": lambda args: "List[{}]".format(args[0].to_pyanno()),
-        "std::tuple": lambda args: "Tuple[{}]".format(", ".join(a.to_pyanno() for a in args)),
-        "std::vector": lambda args: "List[{}]".format(args[0].to_pyanno()),
-        "std::list": lambda args: "List[{}]".format(args[0].to_pyanno()),
-        "std::map": lambda args: "Dict[{}]".format(", ".join(a.to_pyanno() for a in args[:2])),
-        "std::unordered_map": lambda args: "Dict[{}]".format(", ".join(a.to_pyanno() for a in args[:2])),
-        "std::set": lambda args: "Set[{}]".format(args[0].to_pyanno()),
-        "std::unordered_set": lambda args: "Set[{}]".format(args[0].to_pyanno()),
-    } # type: Dict[str, Callable[[List["TemplateTypeStmt"]], str]]
-    def __init__(self, name: str, args: List["TemplateTypeStmt"],
-                 not_template: bool, invalid: bool = False, exist_anno: str = ""):
+        "int":
+        lambda args: "int",
+        "int8_t":
+        lambda args: "int",
+        "int16_t":
+        lambda args: "int",
+        "int32_t":
+        lambda args: "int",
+        "int64_t":
+        lambda args: "int",
+        "uint8_t":
+        lambda args: "int",
+        "uint16_t":
+        lambda args: "int",
+        "uint32_t":
+        lambda args: "int",
+        "uint64_t":
+        lambda args: "int",
+        "unsigned":
+        lambda args: "int",
+        "long":
+        lambda args: "int",
+        "short":
+        lambda args: "int",
+        "float":
+        lambda args: "float",
+        "double":
+        lambda args: "float",
+        "unsigned long":
+        lambda args: "int",
+        "unsigned int":
+        lambda args: "int",
+        "unsigned long long":
+        lambda args: "int",
+        "bool":
+        lambda args: "bool",
+        "std::string":
+        lambda args: "str",
+        "void":
+        lambda args: "None",
+        "std::array":
+        lambda args: "List[{}]".format(args[0].to_pyanno()),
+        "tv::array":
+        lambda args: "List[{}]".format(args[0].to_pyanno()),
+        "std::tuple":
+        lambda args: "Tuple[{}]".format(", ".join(a.to_pyanno()
+                                                  for a in args)),
+        "std::vector":
+        lambda args: "List[{}]".format(args[0].to_pyanno()),
+        "std::list":
+        lambda args: "List[{}]".format(args[0].to_pyanno()),
+        "std::map":
+        lambda args: "Dict[{}]".format(", ".join(a.to_pyanno()
+                                                 for a in args[:2])),
+        "std::unordered_map":
+        lambda args: "Dict[{}]".format(", ".join(a.to_pyanno()
+                                                 for a in args[:2])),
+        "std::set":
+        lambda args: "Set[{}]".format(args[0].to_pyanno()),
+        "std::unordered_set":
+        lambda args: "Set[{}]".format(args[0].to_pyanno()),
+    }  # type: Dict[str, Callable[[List["TemplateTypeStmt"]], str]]
+
+    def __init__(self,
+                 name: str,
+                 args: List["TemplateTypeStmt"],
+                 not_template: bool,
+                 invalid: bool = False,
+                 exist_anno: str = ""):
         self.name = name
         self.args = args
         self.not_template = not_template
@@ -152,7 +190,9 @@ class TemplateTypeStmt(object):
         return pyanno_generic
 
 
-def _simple_template_type_parser_recursive(stmt: str, begin: int, end: int, bracket_pair: Dict[int, int], exist_annos: Dict[str, str]) -> TemplateTypeStmt:
+def _simple_template_type_parser_recursive(
+        stmt: str, begin: int, end: int, bracket_pair: Dict[int, int],
+        exist_annos: Dict[str, str]) -> TemplateTypeStmt:
     if stmt[end - 1] != ">":
         # type with no template param
         name = stmt[begin:end].strip()
@@ -166,34 +206,39 @@ def _simple_template_type_parser_recursive(stmt: str, begin: int, end: int, brac
     name = stmt[begin:left].strip()
     if name in exist_annos:
         return TemplateTypeStmt("", [], True, exist_anno=exist_annos[name])
-    template_arg_ranges = [] # type: List[Tuple[int, int]]
+    template_arg_ranges = []  # type: List[Tuple[int, int]]
     pos = left + 1
     arg_range_start = left + 1
     while pos < end - 1:
         if pos in bracket_pair:
             pos = bracket_pair[pos] + 1
         if pos >= end - 1:
-            break 
+            break
         val = stmt[pos]
         if val == ",":
             template_arg_ranges.append((arg_range_start, pos))
             arg_range_start = pos + 1
         pos += 1
     template_arg_ranges.append((arg_range_start, end - 1))
-    args = [_simple_template_type_parser_recursive(stmt, b, e, bracket_pair, exist_annos) for b, e in template_arg_ranges]
+    args = [
+        _simple_template_type_parser_recursive(stmt, b, e, bracket_pair,
+                                               exist_annos)
+        for b, e in template_arg_ranges
+    ]
     return TemplateTypeStmt(name, args, False)
 
 
-def _simple_template_type_parser(stmt: str, exist_annos: Dict[str, str]) -> TemplateTypeStmt:
+def _simple_template_type_parser(
+        stmt: str, exist_annos: Dict[str, str]) -> TemplateTypeStmt:
     # TODO parse const/ref
     invalid = TemplateTypeStmt("", [], False, True)
-    bracket_stack = [] # type: List[Tuple[str, int]]
+    bracket_stack = []  # type: List[Tuple[str, int]]
     N = len(stmt)
     pos = 0
-    bracket_pair = {} # type: Dict[int, int]
+    bracket_pair = {}  # type: Dict[int, int]
     while pos < N:
         val = stmt[pos]
-        if val  == "<":
+        if val == "<":
             bracket_stack.append((val, pos))
         elif val == ">":
             if not bracket_stack:
@@ -206,10 +251,12 @@ def _simple_template_type_parser(stmt: str, exist_annos: Dict[str, str]) -> Temp
     if "\"" in stmt:
         res = TemplateTypeStmt("", [], False, True)
     try:
-        res = _simple_template_type_parser_recursive(stmt, 0, len(stmt), bracket_pair, exist_annos)
+        res = _simple_template_type_parser_recursive(stmt, 0, len(stmt),
+                                                     bracket_pair, exist_annos)
     except ValueError:
         res = TemplateTypeStmt("", [], False, True)
-    return res 
+    return res
+
 
 def python_anno_parser(anno_str: str):
     anno_str = anno_str.strip()
@@ -252,7 +299,8 @@ class Pybind11MethodMeta(Pybind11Meta):
                  prop_name: str = "",
                  ret_policy: ReturnPolicy = ReturnPolicy.Auto,
                  call_guard: Optional[str] = None,
-                 virtual: bool = False):
+                 virtual: bool = False,
+                 keep_alives: Optional[List[Tuple[int, int]]] = None):
         super().__init__(Pybind11SplitImpl)
         self.bind_name = bind_name
         self.method_type = method_type
@@ -260,6 +308,7 @@ class Pybind11MethodMeta(Pybind11Meta):
         self.ret_policy = ret_policy
         self.call_guard = call_guard
         self.virtual = virtual
+        self.keep_alives = keep_alives
 
 
 class Pybind11PropMeta(Pybind11Meta):
@@ -343,6 +392,9 @@ class PybindMethodDecl(object):
         if self.decl.is_overload:
             addr = self.get_overload_addr()
         attrs = self.args.copy()
+        if self.mw_meta.keep_alives is not None:
+            attrs.extend("pybind11::keep_alive<{}, {}>".format(x, y)
+                         for x, y in self.mw_meta.keep_alives)
         attrs.append(self.mw_meta.ret_policy.value)
         if self.mw_meta.call_guard is not None:
             attrs.append("pybind11::call_guard<{}>()".format(
@@ -517,14 +569,17 @@ def _postprocess_class(cls_name: str, cls_namespace: str, submod: str,
     return cls_def_block, vblock
 
 
-def _extract_anno_default(user_anno: Optional[str],
-                          type_str: str,
-                          exist_annos: Dict[str, str],
-                          cpp_default: Optional[str] = None,):
+def _extract_anno_default(
+    user_anno: Optional[str],
+    type_str: str,
+    exist_annos: Dict[str, str],
+    cpp_default: Optional[str] = None,
+):
     from_imports = []  # type: List[str]
     default = None
     if user_anno is None:
-        try_extract_pyanno_res = _simple_template_type_parser(type_str, exist_annos)
+        try_extract_pyanno_res = _simple_template_type_parser(
+            type_str, exist_annos)
         try_extract_pyanno = try_extract_pyanno_res.to_pyanno()
         if try_extract_pyanno != "Any":
             if default is None:
@@ -532,7 +587,8 @@ def _extract_anno_default(user_anno: Optional[str],
                     if type_str in _AUTO_ANNO_TYPES_DEFAULT_HANDLER:
                         handler = _AUTO_ANNO_TYPES_DEFAULT_HANDLER[type_str]
                         default = handler(cpp_default)
-            try_extract_pyanno, from_imports = python_anno_parser(try_extract_pyanno)
+            try_extract_pyanno, from_imports = python_anno_parser(
+                try_extract_pyanno)
             return try_extract_pyanno, from_imports, default
     anno = None
     if user_anno is not None:
@@ -550,8 +606,8 @@ def _extract_anno_default(user_anno: Optional[str],
 
     return anno, from_imports, default
 
-def _collect_exist_annos(decls: List[Union[PybindMethodDecl,
-                                     PybindPropDecl]]):
+
+def _collect_exist_annos(decls: List[Union[PybindMethodDecl, PybindPropDecl]]):
     # TODO handle annos for pccm classes
     # we need to remove all annotations of pccm class
 
@@ -563,7 +619,7 @@ def _collect_exist_annos(decls: List[Union[PybindMethodDecl,
             method_decls.append(decl)
         else:
             prop_decls.append(decl)
-    exist_annos = {} # type: Dict[str, str]
+    exist_annos = {}  # type: Dict[str, str]
     for prop_decl in prop_decls:
         prop_type = prop_decl.decl.type_str
         user_anno = prop_decl.decl.pyanno
@@ -571,7 +627,7 @@ def _collect_exist_annos(decls: List[Union[PybindMethodDecl,
             user_anno_pair = user_anno.split("=")
             user_anno_type = user_anno_pair[0].strip()
             exist_annos[prop_type] = user_anno_type
-    
+
     for pydecl in method_decls:
         user_anno = pydecl.decl.code.ret_pyanno
         ret_type = pydecl.decl.code.return_type
@@ -853,7 +909,6 @@ class Pybind11SplitMain(ParameterizedClass):
             methods (overloaded methods)
         TODO handle c++ operators
         TODO better code
-        TODO auto generate STL annotations
         TODO insert docstring if exists
         """
         init_import = "from typing import overload, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union"
@@ -862,9 +917,10 @@ class Pybind11SplitMain(ParameterizedClass):
         ns_to_interfaces = OrderedDict()  # type: Dict[str, List[Block]]
         ns_to_imports = OrderedDict()  # type: Dict[str, List[str]]
         ns_to_interface = OrderedDict()  # type: Dict[str, str]
-        exist_annos = {} # type: Dict[str, str]
+        exist_annos = {}  # type: Dict[str, str]
         for bind_cu in bind_cus:
-            exist_annos.update(_collect_exist_annos(bind_cu.get_pybind_decls()))
+            exist_annos.update(_collect_exist_annos(
+                bind_cu.get_pybind_decls()))
         for bind_cu in bind_cus:
             origin_cu = bind_cu.cu
             ns = origin_cu.namespace
@@ -877,14 +933,24 @@ class Pybind11SplitMain(ParameterizedClass):
                 origin_cu._enum_classes, exist_annos)
             ns_to_imports[ns].extend(cls_imports)
             ns_to_interfaces[ns].append(class_block)
+        module_as_init = set()  # type: Set[str]
+        for k, interfaces in ns_to_interfaces.items():
+            k_prefix = ".".join(k.split(".")[:-1])
+            if k_prefix and k_prefix in ns_to_interfaces:
+                module_as_init.add(k_prefix)
 
         for k, interfaces in ns_to_interfaces.items():
+            k_file = k
+            # if this module have submodule, we need
+            # to use a module directory instead a single file.
+            if k in module_as_init:
+                k_file += ".__init__"
             imports = ns_to_imports[k]
             imports.insert(0, init_pccm_import)
             imports.insert(0, init_import)
 
             imports = _unique_list_keep_order(imports)
-            ns_to_interface[k] = "\n".join(
+            ns_to_interface[k_file] = "\n".join(
                 generate_code_list(imports + interfaces, 0, 4))
         return ns_to_interface
 
@@ -930,14 +996,16 @@ def mark(func=None,
          method_type: MethodType = MethodType.Normal,
          ret_policy: ReturnPolicy = ReturnPolicy.Auto,
          virtual: bool = False,
-         nogil: bool = False):
+         nogil: bool = False,
+         keep_alives: Optional[List[Tuple[int, int]]] = None):
     if virtual:
         assert not nogil, "you can't release gil for python virtual function."
     call_guard = None  # type: Optional[str]
     if nogil:
         call_guard = "pybind11::gil_scoped_release"
     pybind_meta = Pybind11MethodMeta(bind_name, method_type, prop_name,
-                                     ret_policy, call_guard, virtual)
+                                     ret_policy, call_guard, virtual,
+                                     keep_alives)
     return middleware_decorator(func, pybind_meta)
 
 
@@ -969,4 +1037,8 @@ if __name__ == "__main__":
     # print(ast.parse)
     print(python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]"))
     # python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]")
-    print(_simple_template_type_parser("std::vector<std::tuple<int, ArrayPtr>>", {"ArrayPtr": "ArrayPtr"}).to_pyanno())
+    print(
+        _simple_template_type_parser("std::vector<std::tuple<int, ArrayPtr>>",
+                                     {
+                                         "ArrayPtr": "ArrayPtr"
+                                     }).to_pyanno())

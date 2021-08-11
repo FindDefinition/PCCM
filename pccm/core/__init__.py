@@ -9,8 +9,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 from ccimport import compat, loader
 
-from pccm.constants import (PCCM_FUNC_META_KEY, PCCM_INIT_DECORATOR_KEY,
-                            PCCM_CLASS_META_KEY)
+from pccm.constants import (PCCM_CLASS_META_KEY, PCCM_FUNC_META_KEY,
+                            PCCM_INIT_DECORATOR_KEY)
 from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 
@@ -66,12 +66,12 @@ class FunctionMeta(object):
     def is_header_only(self):
         return self.inline or self.constexpr or self.pure_virtual
 
+
 class ClassMeta(object):
-    def __init__(self,
-                 name: Optional[str] = None,
-                 skip_inherit: bool = False):
+    def __init__(self, name: Optional[str] = None, skip_inherit: bool = False):
         self.skip_inherit = skip_inherit
         self.name = name
+
 
 def get_func_meta_except(func) -> FunctionMeta:
     if not hasattr(func, PCCM_FUNC_META_KEY):
@@ -79,10 +79,12 @@ def get_func_meta_except(func) -> FunctionMeta:
             "you need to mark method before use middleware decorator.")
     return getattr(func, PCCM_FUNC_META_KEY)
 
+
 def get_class_meta(cls: Type) -> Optional[ClassMeta]:
     if not hasattr(cls, PCCM_CLASS_META_KEY):
-        return None 
+        return None
     return getattr(cls, PCCM_CLASS_META_KEY)
+
 
 class ConstructorMeta(FunctionMeta):
     def __init__(self,
@@ -425,6 +427,8 @@ class FunctionCode(object):
         self.func_doc = None  # type: Optional[str]
         self.code_after_include = None  # type: Optional[str]
 
+        self._additional_pre_attrs: List[str] = []
+
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0
 
@@ -540,7 +544,8 @@ class FunctionCode(object):
         pre_attrs ret_type name(args) post_attrs;
         """
         header_only = meta.is_header_only() or self.is_template()
-        pre_attrs = _unique_list_keep_order(meta.get_pre_attrs())
+        pre_attrs = _unique_list_keep_order(meta.get_pre_attrs() +
+                                            self._additional_pre_attrs)
         post_attrs = _unique_list_keep_order(meta.get_post_attrs())
         return_type = self.return_type
         if isinstance(meta, (ConstructorMeta, DestructorMeta)):
@@ -586,7 +591,8 @@ class FunctionCode(object):
         if meta.pure_virtual:
             return self.get_sig(name, meta)
         header_only = meta.is_header_only() or self.is_template()
-        pre_attrs = _unique_list_keep_order(meta.get_pre_attrs())
+        pre_attrs = _unique_list_keep_order(meta.get_pre_attrs() +
+                                            self._additional_pre_attrs)
         post_attrs = _unique_list_keep_order(meta.get_post_attrs())
         if not header_only:
             pre_attrs = self._clean_pre_attrs_impl(pre_attrs)
@@ -732,6 +738,9 @@ class FunctionCode(object):
         fmts.append(" */")
         return "\n".join(fmts)
 
+    def add_pre_attr(self, attr: str):
+        self._additional_pre_attrs.append(attr)
+
 
 class FunctionDecl(object):
     def __init__(self, meta: FunctionMeta, code: FunctionCode):
@@ -801,7 +810,6 @@ class Class(object):
         self._this_type_to_param_class = {
             self._this_cls_type: OrderedDict()
         }  # type: Dict[Optional[Type[Class]], Dict[str, ParameterizedClass]]
-
 
         self._this_type_to_param_class_alias = {
             self._this_cls_type: OrderedDict()
@@ -977,9 +985,9 @@ class Class(object):
             self._param_class[subnamespace] = []
         self._param_class[subnamespace].append((param_class, name_alias))
 
-    def add_impl_only_dependency(self, 
-                                  func_or_list_funcs: Union[Callable,
-                                                            List[Callable]],
+    def add_impl_only_dependency(self,
+                                 func_or_list_funcs: Union[Callable,
+                                                           List[Callable]],
                                  *no_param_class_cls: Type["Class"]):
         if not isinstance(func_or_list_funcs, list):
             func_or_list_funcs = [func_or_list_funcs]
@@ -1589,7 +1597,8 @@ class CodeGenerator(object):
                         cur_type_trace_copy.add(dep)
                         stack.append((cu_type_to_cu[dep], cur_type_trace_copy))
 
-                    for k, pcls_with_alias_tuples in cur_cu._param_class.items():
+                    for k, pcls_with_alias_tuples in cur_cu._param_class.items(
+                    ):
                         for pcls, _ in pcls_with_alias_tuples:
                             if type(pcls) in cur_type_trace:
                                 raise ValueError("cycle detected")

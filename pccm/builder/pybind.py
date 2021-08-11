@@ -6,7 +6,7 @@ from ccimport.buildtools.writer import DEFAULT_MSVC_DEP_PREFIX
 
 from pccm.core import Class, CodeFormatter, CodeGenerator, ManualClassGenerator
 from pccm.core.buildmeta import BuildMeta
-from pccm.middlewares import pybind, expose_main
+from pccm.middlewares import expose_main, pybind
 
 
 def build_pybind(cus: List[Class],
@@ -120,27 +120,27 @@ def build_pybind(cus: List[Class],
 
 
 def build_library(cus: List[Class],
-                 out_path: Union[str, Path],
-                 middlewares: Optional[List[ManualClassGenerator]] = None,
-                 includes: Optional[List[Union[str, Path]]] = None,
-                 libpaths: Optional[List[Union[str, Path]]] = None,
-                 libraries: Optional[List[str]] = None,
-                 compile_options: Optional[List[str]] = None,
-                 link_options: Optional[List[str]] = None,
-                 std="c++14",
-                 disable_hash=True,
-                 shared: bool = True,
-                 main_file_suffix: str = ".cc",
-                 additional_cflags: Optional[Dict[str, List[str]]] = None,
-                 additional_lflags: Optional[Dict[str, List[str]]] = None,
-                 msvc_deps_prefix=DEFAULT_MSVC_DEP_PREFIX,
-                 build_dir: Optional[Union[str, Path]] = None,
-                 namespace_root: Optional[Union[str, Path]] = None,
-                 code_fmt: Optional[CodeFormatter] = None,
-                 out_root: Optional[Union[str, Path]] = None,
-                 suffix_to_compiler: Optional[Dict[str, List[str]]] = None,
-                 disable_pch: bool = False,
-                 verbose=False):
+                  out_path: Union[str, Path],
+                  middlewares: Optional[List[ManualClassGenerator]] = None,
+                  includes: Optional[List[Union[str, Path]]] = None,
+                  libpaths: Optional[List[Union[str, Path]]] = None,
+                  libraries: Optional[List[str]] = None,
+                  compile_options: Optional[List[str]] = None,
+                  link_options: Optional[List[str]] = None,
+                  std="c++14",
+                  disable_hash=True,
+                  shared: bool = True,
+                  main_file_suffix: str = ".cc",
+                  additional_cflags: Optional[Dict[str, List[str]]] = None,
+                  additional_lflags: Optional[Dict[str, List[str]]] = None,
+                  msvc_deps_prefix=DEFAULT_MSVC_DEP_PREFIX,
+                  build_dir: Optional[Union[str, Path]] = None,
+                  namespace_root: Optional[Union[str, Path]] = None,
+                  code_fmt: Optional[CodeFormatter] = None,
+                  out_root: Optional[Union[str, Path]] = None,
+                  suffix_to_compiler: Optional[Dict[str, List[str]]] = None,
+                  disable_pch: bool = False,
+                  verbose=False):
     subnamespace = Path(out_path).stem
 
     if build_dir is None:
@@ -169,7 +169,7 @@ def build_library(cus: List[Class],
     SRC_ROOT = build_dir / "src"
     # build graph for middleware only. so we can't apply middleware again.
     header_dict, impl_dict, header_to_impls = cg.code_generation(user_cus)
-    
+
     pch_to_sources = {}  # type: Dict[Path, List[Path]]
     pch_to_include = {}  # type: Dict[Path, str]
     if not disable_pch:
