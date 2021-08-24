@@ -324,10 +324,10 @@ class PybindMethodDecl(object):
                  mw_meta: Pybind11MethodMeta):
         self.decl = decl
         self.mw_meta = mw_meta
+        self.func_name = decl.get_function_name()
+        self.bind_name = self.func_name
         if mw_meta.bind_name:
-            self.func_name = mw_meta.bind_name
-        else:
-            self.func_name = decl.get_function_name()
+            self.bind_name = mw_meta.bind_name
         self.method_type = mw_meta.method_type
         member_meta = decl.meta
         if mw_meta.virtual:
@@ -381,13 +381,13 @@ class PybindMethodDecl(object):
                 return ".def({})".format(self.addr)
 
         def_stmt = "def"
-        func_name = self.func_name
+        bind_name = self.bind_name
 
         if isinstance(self.decl.meta, StaticMemberFunctionMeta):
             def_stmt = "def_static"
         if self.method_type == MethodType.PropGetter:
             def_stmt = "def_property_readonly"
-            func_name = self.mw_meta.prop_name
+            bind_name = self.mw_meta.prop_name
         addr = self.addr
         if self.decl.is_overload:
             addr = self.get_overload_addr()
@@ -404,10 +404,10 @@ class PybindMethodDecl(object):
             def_stmt = "def_property"
         # if self.decl.meta.mw_metas
         if attrs:
-            return ".{}(\"{}\", {}, {})".format(def_stmt, func_name, addr,
+            return ".{}(\"{}\", {}, {})".format(def_stmt, bind_name, addr,
                                                 ", ".join(attrs))
         else:
-            return ".{}(\"{}\", {})".format(def_stmt, func_name, addr)
+            return ".{}(\"{}\", {})".format(def_stmt, bind_name, addr)
 
     def get_virtual_string(self, parent_cls_name: str):
         fmt = "{} {} {{PYBIND11_OVERRIDE({}, {}, {}, {});}}"
@@ -424,7 +424,7 @@ class PybindMethodDecl(object):
                                          with_pure=False)
         arg_names = ", ".join(a.name for a in self.decl.code.arguments)
         return fmt.format(sig_str, override, self.decl.code.return_type,
-                          parent_cls_name, self.func_name, arg_names)
+                          parent_cls_name, self.bind_name, arg_names)
 
 
 class PybindPropDecl(object):
