@@ -86,6 +86,7 @@ def member_function(func=None,
                     macro_guard: Optional[str] = None,
                     impl_loc: str = "",
                     impl_file_suffix: str = ".cc",
+                    header_only: Optional[bool] = None,
                     name=None):
     meta = MemberFunctionMeta(name=name,
                               inline=inline,
@@ -98,7 +99,8 @@ def member_function(func=None,
                               macro_guard=macro_guard,
                               impl_loc=impl_loc,
                               impl_file_suffix=impl_file_suffix,
-                              attrs=attrs)
+                              attrs=attrs,
+                              header_only=header_only)
 
     return meta_decorator(func, meta)
 
@@ -110,16 +112,16 @@ def static_function(func=None,
                     macro_guard: Optional[str] = None,
                     impl_loc: str = "",
                     impl_file_suffix: str = ".cc",
+                    header_only: Optional[bool] = None,
                     name=None):
-    meta = StaticMemberFunctionMeta(
-        name=name,
-        inline=inline,
-        constexpr=constexpr,
-        attrs=attrs,
-        macro_guard=macro_guard,
-        impl_loc=impl_loc,
-        impl_file_suffix=impl_file_suffix,
-    )
+    meta = StaticMemberFunctionMeta(name=name,
+                                    inline=inline,
+                                    constexpr=constexpr,
+                                    attrs=attrs,
+                                    macro_guard=macro_guard,
+                                    impl_loc=impl_loc,
+                                    impl_file_suffix=impl_file_suffix,
+                                    header_only=header_only)
     return meta_decorator(func, meta)
 
 
@@ -130,16 +132,16 @@ def external_function(func=None,
                       macro_guard: Optional[str] = None,
                       impl_loc: str = "",
                       impl_file_suffix: str = ".cc",
+                      header_only: Optional[bool] = None,
                       name=None):
-    meta = ExternalFunctionMeta(
-        name=name,
-        inline=inline,
-        constexpr=constexpr,
-        attrs=attrs,
-        macro_guard=macro_guard,
-        impl_loc=impl_loc,
-        impl_file_suffix=impl_file_suffix,
-    )
+    meta = ExternalFunctionMeta(name=name,
+                                inline=inline,
+                                constexpr=constexpr,
+                                attrs=attrs,
+                                macro_guard=macro_guard,
+                                impl_loc=impl_loc,
+                                impl_file_suffix=impl_file_suffix,
+                                header_only=header_only)
     return meta_decorator(func, meta)
 
 
@@ -149,15 +151,15 @@ def constructor(func=None,
                 attrs: Optional[List[str]] = None,
                 macro_guard: Optional[str] = None,
                 impl_loc: str = "",
-                impl_file_suffix: str = ".cc"):
-    meta = ConstructorMeta(
-        inline=inline,
-        constexpr=constexpr,
-        attrs=attrs,
-        macro_guard=macro_guard,
-        impl_loc=impl_loc,
-        impl_file_suffix=impl_file_suffix,
-    )
+                impl_file_suffix: str = ".cc",
+                header_only: Optional[bool] = None):
+    meta = ConstructorMeta(inline=inline,
+                           constexpr=constexpr,
+                           attrs=attrs,
+                           macro_guard=macro_guard,
+                           impl_loc=impl_loc,
+                           impl_file_suffix=impl_file_suffix,
+                           header_only=header_only)
     return meta_decorator(func, meta)
 
 
@@ -171,19 +173,19 @@ def destructor(func=None,
                attrs: Optional[List[str]] = None,
                macro_guard: Optional[str] = None,
                impl_loc: str = "",
-               impl_file_suffix: str = ".cc"):
-    meta = DestructorMeta(
-        inline=inline,
-        constexpr=constexpr,
-        virtual=virtual,
-        pure_virtual=pure_virtual,
-        override=override,
-        final=final,
-        attrs=attrs,
-        macro_guard=macro_guard,
-        impl_loc=impl_loc,
-        impl_file_suffix=impl_file_suffix,
-    )
+               impl_file_suffix: str = ".cc",
+               header_only: Optional[bool] = None):
+    meta = DestructorMeta(inline=inline,
+                          constexpr=constexpr,
+                          virtual=virtual,
+                          pure_virtual=pure_virtual,
+                          override=override,
+                          final=final,
+                          attrs=attrs,
+                          macro_guard=macro_guard,
+                          impl_loc=impl_loc,
+                          impl_file_suffix=impl_file_suffix,
+                          header_only=header_only)
     return meta_decorator(func, meta)
 
 

@@ -44,6 +44,7 @@ def cuda_global_function(func=None,
                          impl_loc: str = "",
                          impl_file_suffix: str = ".cu",
                          launch_bounds: Optional[Tuple[int, int]] = None,
+                         header_only: Optional[bool] = None,
                          name=None):
     if attrs is None:
         attrs = []
@@ -58,7 +59,8 @@ def cuda_global_function(func=None,
                                      macro_guard=macro_guard,
                                      impl_loc=impl_loc,
                                      impl_file_suffix=impl_file_suffix,
-                                     attrs=cuda_global_attrs)
+                                     attrs=cuda_global_attrs,
+                                     header_only=header_only)
 
 
 def member_function(func=None,
@@ -72,6 +74,7 @@ def member_function(func=None,
                     macro_guard: Optional[str] = None,
                     impl_loc: str = "",
                     impl_file_suffix: str = ".cu",
+                    header_only: Optional[bool] = None,
                     name=None):
     if forceinline or inline:
         assert forceinline is not inline, "can't set both inline and forceinline"
@@ -95,6 +98,7 @@ def member_function(func=None,
                                   macro_guard=macro_guard,
                                   impl_loc=impl_loc,
                                   impl_file_suffix=impl_file_suffix,
+                                  header_only=header_only,
                                   attrs=attrs)
     return markers.meta_decorator(func, meta)
 
@@ -109,6 +113,7 @@ def static_function(func=None,
                     macro_guard: Optional[str] = None,
                     impl_loc: str = "",
                     impl_file_suffix: str = ".cu",
+                    header_only: Optional[bool] = None,
                     name=None):
     if forceinline or inline:
         assert forceinline is not inline, "can't set both inline and forceinline"
@@ -122,15 +127,14 @@ def static_function(func=None,
     if attrs is None:
         attrs = []
     attrs.extend(cuda_global_attrs)
-    meta = CudaStaticMemberFunctionMeta(
-        name=name,
-        inline=inline,
-        constexpr=constexpr,
-        attrs=attrs,
-        macro_guard=macro_guard,
-        impl_loc=impl_loc,
-        impl_file_suffix=impl_file_suffix,
-    )
+    meta = CudaStaticMemberFunctionMeta(name=name,
+                                        inline=inline,
+                                        constexpr=constexpr,
+                                        attrs=attrs,
+                                        macro_guard=macro_guard,
+                                        impl_loc=impl_loc,
+                                        impl_file_suffix=impl_file_suffix,
+                                        header_only=header_only)
     return markers.meta_decorator(func, meta)
 
 
@@ -144,6 +148,7 @@ def external_function(func=None,
                       macro_guard: Optional[str] = None,
                       impl_loc: str = "",
                       impl_file_suffix: str = ".cu",
+                      header_only: Optional[bool] = None,
                       name=None):
     if forceinline or inline:
         assert forceinline is not inline, "can't set both inline and forceinline"
@@ -157,15 +162,14 @@ def external_function(func=None,
     if attrs is None:
         attrs = []
     attrs.extend(cuda_global_attrs)
-    meta = CudaExternalFunctionMeta(
-        name=name,
-        inline=inline,
-        constexpr=constexpr,
-        attrs=attrs,
-        macro_guard=macro_guard,
-        impl_loc=impl_loc,
-        impl_file_suffix=impl_file_suffix,
-    )
+    meta = CudaExternalFunctionMeta(name=name,
+                                    inline=inline,
+                                    constexpr=constexpr,
+                                    attrs=attrs,
+                                    macro_guard=macro_guard,
+                                    impl_loc=impl_loc,
+                                    impl_file_suffix=impl_file_suffix,
+                                    header_only=header_only)
     return markers.meta_decorator(func, meta)
 
 
@@ -179,6 +183,7 @@ def constructor(func=None,
                 macro_guard: Optional[str] = None,
                 impl_loc: str = "",
                 impl_file_suffix: str = ".cu",
+                header_only: Optional[bool] = None,
                 name=None):
     if forceinline or inline:
         assert forceinline is not inline, "can't set both inline and forceinline"
@@ -192,12 +197,11 @@ def constructor(func=None,
     if attrs is None:
         attrs = []
     attrs.extend(cuda_global_attrs)
-    meta = CudaConstructorMeta(
-        inline=inline,
-        constexpr=constexpr,
-        attrs=attrs,
-        macro_guard=macro_guard,
-        impl_loc=impl_loc,
-        impl_file_suffix=impl_file_suffix,
-    )
+    meta = CudaConstructorMeta(inline=inline,
+                               constexpr=constexpr,
+                               attrs=attrs,
+                               macro_guard=macro_guard,
+                               impl_loc=impl_loc,
+                               impl_file_suffix=impl_file_suffix,
+                               header_only=header_only)
     return markers.meta_decorator(func, meta)

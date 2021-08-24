@@ -34,7 +34,8 @@ class FunctionMeta(object):
                  name: Optional[str] = None,
                  macro_guard: Optional[str] = None,
                  impl_loc: str = "",
-                 impl_file_suffix: str = ".cc"):
+                 impl_file_suffix: str = ".cc",
+                 header_only: Optional[bool] = None):
         self.name = name
         if attrs is None:
             attrs = []
@@ -51,6 +52,7 @@ class FunctionMeta(object):
         self.virtual = virtual
         self.pure_virtual = pure_virtual
         self.macro_guard = macro_guard
+        self.header_only_user = header_only
 
     def get_pre_attrs(self) -> List[str]:
         res = self.attrs.copy()  # type: List[str]
@@ -64,7 +66,10 @@ class FunctionMeta(object):
         return []
 
     def is_header_only(self):
-        return self.inline or self.constexpr or self.pure_virtual
+        if self.header_only_user is not None:
+            return self.inline or self.constexpr or self.pure_virtual or self.header_only_user
+        else:
+            return self.inline or self.constexpr or self.pure_virtual
 
 
 class ClassMeta(object):
@@ -95,14 +100,16 @@ class ConstructorMeta(FunctionMeta):
                  name: Optional[str] = None,
                  macro_guard: Optional[str] = None,
                  impl_loc: str = "",
-                 impl_file_suffix: str = ".cc"):
+                 impl_file_suffix: str = ".cc",
+                 header_only: Optional[bool] = None):
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
                          name=name,
                          macro_guard=macro_guard,
                          impl_loc=impl_loc,
-                         impl_file_suffix=impl_file_suffix)
+                         impl_file_suffix=impl_file_suffix,
+                         header_only=header_only)
         self.explicit = explicit
 
     def get_pre_attrs(self) -> List[str]:
@@ -124,7 +131,8 @@ class DestructorMeta(FunctionMeta):
                  name: Optional[str] = None,
                  macro_guard: Optional[str] = None,
                  impl_loc: str = "",
-                 impl_file_suffix: str = ".cc"):
+                 impl_file_suffix: str = ".cc",
+                 header_only: Optional[bool] = None):
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
@@ -133,7 +141,8 @@ class DestructorMeta(FunctionMeta):
                          name=name,
                          macro_guard=macro_guard,
                          impl_loc=impl_loc,
-                         impl_file_suffix=impl_file_suffix)
+                         impl_file_suffix=impl_file_suffix,
+                         header_only=header_only)
         self.override = override
         self.final = final
         if override or final:
@@ -167,7 +176,8 @@ class MemberFunctionMeta(FunctionMeta):
                  name: Optional[str] = None,
                  macro_guard: Optional[str] = None,
                  impl_loc: str = "",
-                 impl_file_suffix: str = ".cc"):
+                 impl_file_suffix: str = ".cc",
+                 header_only: Optional[bool] = None):
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          virtual=virtual,
@@ -176,7 +186,8 @@ class MemberFunctionMeta(FunctionMeta):
                          name=name,
                          macro_guard=macro_guard,
                          impl_loc=impl_loc,
-                         impl_file_suffix=impl_file_suffix)
+                         impl_file_suffix=impl_file_suffix,
+                         header_only=header_only)
         self.override = override
         self.final = final
         if override or final:
@@ -208,14 +219,16 @@ class StaticMemberFunctionMeta(FunctionMeta):
                  name: Optional[str] = None,
                  macro_guard: Optional[str] = None,
                  impl_loc: str = "",
-                 impl_file_suffix: str = ".cc"):
+                 impl_file_suffix: str = ".cc",
+                 header_only: Optional[bool] = None):
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
                          name=name,
                          macro_guard=macro_guard,
                          impl_loc=impl_loc,
-                         impl_file_suffix=impl_file_suffix)
+                         impl_file_suffix=impl_file_suffix,
+                         header_only=header_only)
 
     def get_pre_attrs(self) -> List[str]:
         res = super().get_pre_attrs()  # type: List[str]
@@ -233,14 +246,16 @@ class ExternalFunctionMeta(FunctionMeta):
                  name: Optional[str] = None,
                  macro_guard: Optional[str] = None,
                  impl_loc: str = "",
-                 impl_file_suffix: str = ".cc"):
+                 impl_file_suffix: str = ".cc",
+                 header_only: Optional[bool] = None):
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
                          name=name,
                          macro_guard=macro_guard,
                          impl_loc=impl_loc,
-                         impl_file_suffix=impl_file_suffix)
+                         impl_file_suffix=impl_file_suffix,
+                         header_only=header_only)
 
 
 class Argument(object):
@@ -427,7 +442,7 @@ class FunctionCode(object):
         self.func_doc = None  # type: Optional[str]
         self.code_after_include = None  # type: Optional[str]
 
-        self._additional_pre_attrs = [] # type: List[str]
+        self._additional_pre_attrs = []  # type: List[str]
 
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0
@@ -581,7 +596,10 @@ class FunctionCode(object):
         if pre_attrs_str:
             prefix_fmt = pre_attrs_str + " " + prefix_fmt
         doc = self.generate_cpp_doc()
-        return doc + "\n" + template_fmt + prefix_fmt
+        if meta.macro_guard is not None:
+            return doc + "\n" + f"#if {meta.macro_guard}\n" + template_fmt + prefix_fmt + "\n#endif"
+        else:
+            return doc + "\n" + template_fmt + prefix_fmt
 
     def get_impl(self, name: str, meta: FunctionMeta, class_name: str = ""):
         """
@@ -635,6 +653,8 @@ class FunctionCode(object):
         blocks = []  # List[Union[Block, str]]
         blocks.extend(self._blocks)
         block = Block(template_fmt + prefix_fmt, blocks, "}")
+        if meta.macro_guard is not None:
+            block = Block(f"#if {meta.macro_guard}", [block], "#endif")
         return block
 
     def arg(self,
