@@ -690,10 +690,10 @@ def _generate_python_interface_class(cls_name: str,
         decl_codes.append("{}: {}{}".format(prop_decl.decl.name, prop_anno,
                                             default_str))
     for decl in method_decls:
-        if decl.func_name not in name_to_overloaded:
-            name_to_overloaded[decl.func_name] = []
-        name_to_overloaded[decl.func_name].append(decl)
-    for func_name, over_decls in name_to_overloaded.items():
+        if decl.bind_name not in name_to_overloaded:
+            name_to_overloaded[decl.bind_name] = []
+        name_to_overloaded[decl.bind_name].append(decl)
+    for bind_name, over_decls in name_to_overloaded.items():
         if len(over_decls) == 1:
             fmt = "{}def {}({}){}: {}..."
         else:
@@ -716,9 +716,9 @@ def _generate_python_interface_class(cls_name: str,
                     anno = "\"{}\"".format(anno)
                 res_anno = " -> {}".format(anno)
                 imports.extend(from_imports)
-            decl_func_name = func_name
+            decl_bind_name = bind_name
             if isinstance(pydecl.decl.meta, ConstructorMeta):
-                decl_func_name = "__init__"
+                decl_bind_name = "__init__"
 
             arg_names = []  # type: List[str]
             have_default = False  # type: bool
@@ -734,7 +734,7 @@ def _generate_python_interface_class(cls_name: str,
                     if have_default:
                         msg = ("you must provide a python default anno value "
                                "for {} of {}. format: PythonType = Default")
-                        raise ValueError(msg.format(arg.name, decl_func_name))
+                        raise ValueError(msg.format(arg.name, decl_bind_name))
                 if user_anno is not None:
                     if user_anno == cls_name:
                         user_anno = "\"{}\"".format(user_anno)
@@ -753,13 +753,13 @@ def _generate_python_interface_class(cls_name: str,
                 decorator = "@staticmethod\n"
             if pydecl.method_type == MethodType.PropGetter:
                 decorator = "@property\n"
-                decl_func_name = pydecl.mw_meta.prop_name
+                decl_bind_name = pydecl.mw_meta.prop_name
             elif pydecl.method_type == MethodType.PropSetter:
                 decorator = "@{}.setter\n".format(pydecl.mw_meta.prop_name)
-                decl_func_name = pydecl.mw_meta.prop_name
+                decl_bind_name = pydecl.mw_meta.prop_name
 
             decl_codes.append(
-                fmt.format(decorator, decl_func_name, py_sig, res_anno, doc))
+                fmt.format(decorator, decl_bind_name, py_sig, res_anno, doc))
     # Class EnumName:
     for ec in enum_classes:
         ec_items = []  # type: List[Union[Block, str]]
