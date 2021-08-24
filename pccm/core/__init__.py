@@ -597,7 +597,7 @@ class FunctionCode(object):
             prefix_fmt = pre_attrs_str + " " + prefix_fmt
         doc = self.generate_cpp_doc()
         if meta.macro_guard is not None:
-            return doc + "\n" + f"#if {meta.macro_guard}\n" + template_fmt + prefix_fmt + "\n#endif"
+            return doc + "\n" + "#if {}\n".format(meta.macro_guard) + template_fmt + prefix_fmt + "\n#endif"
         else:
             return doc + "\n" + template_fmt + prefix_fmt
 
@@ -654,7 +654,7 @@ class FunctionCode(object):
         blocks.extend(self._blocks)
         block = Block(template_fmt + prefix_fmt, blocks, "}")
         if meta.macro_guard is not None:
-            block = Block(f"#if {meta.macro_guard}", [block], "#endif")
+            block = Block("#if {}".format(meta.macro_guard), [block], "#endif")
         return block
 
     def arg(self,
