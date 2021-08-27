@@ -12,7 +12,7 @@ class Test3(pccm.Class):
         self.add_member("hahaha",
                         "int",
                         pyanno="int",
-                        mw_metas=[pccm.pybind.Pybind11PropMeta()])
+                        mw_metas=[pccm.pybind.Pybind11PropMeta(name="hahaha")])
         self.add_member("private_prop_",
                         "int",
                         "0",
