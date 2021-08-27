@@ -314,9 +314,10 @@ class Pybind11MethodMeta(Pybind11Meta):
 class Pybind11PropMeta(Pybind11Meta):
     """may add some attributes in future.
     """
-    def __init__(self, readwrite: bool = True):
+    def __init__(self, name: str, readwrite: bool = True):
         super().__init__(Pybind11SplitImpl)
         self.readwrite = readwrite
+        self.name = name 
 
 
 class PybindMethodDecl(object):
@@ -439,7 +440,7 @@ class PybindPropDecl(object):
         def_stmt = "def_readwrite"
         if not self.mw_meta.readwrite:
             def_stmt = "def_readonly"
-        return ".{}(\"{}\", {})".format(def_stmt, self.decl.name, self.addr)
+        return ".{}(\"{}\", {})".format(def_stmt, self.mw_meta.name, self.addr)
 
 
 class PybindClassMixin:
@@ -450,10 +451,13 @@ class PybindClassMixin:
                           array: Optional[str] = None,
                           pyanno: Optional[str] = None,
                           readwrite: bool = True,
+                          prop_name: Optional[str] = None,
                           mw_metas: Optional[List[MiddlewareMeta]] = None):
         if mw_metas is None:
             mw_metas = []
-        mw_metas.append(Pybind11PropMeta(readwrite))
+        if prop_name is None:
+            prop_name = name 
+        mw_metas.append(Pybind11PropMeta(prop_name, readwrite))
         return self.add_member(name=name,
                                type=type,
                                default=default,
