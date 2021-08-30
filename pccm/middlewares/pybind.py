@@ -436,6 +436,12 @@ class PybindPropDecl(object):
         self.addr = "&{}::{}::{}".format(namespace.replace(".", "::"),
                                          class_name, self.decl.name)
 
+    def get_prop_name(self) -> str:
+        if self.mw_meta.name:
+            return self.mw_meta.name
+        else:
+            return self.decl.name
+
     def to_string(self) -> str:
         def_stmt = "def_readwrite"
         if not self.mw_meta.readwrite:
@@ -691,7 +697,7 @@ def _generate_python_interface_class(cls_name: str,
         default_str = ""
         if default is not None:
             default_str = " = {}".format(default)
-        decl_codes.append("{}: {}{}".format(prop_decl.decl.name, prop_anno,
+        decl_codes.append("{}: {}{}".format(prop_decl.get_prop_name(), prop_anno,
                                             default_str))
     for decl in method_decls:
         if decl.bind_name not in name_to_overloaded:
