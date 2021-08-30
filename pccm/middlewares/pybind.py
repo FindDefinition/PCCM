@@ -65,36 +65,41 @@ def get_attribute_name_parts(node):
     return parts[::-1]
 
 
-def _anno_parser(node: ast.AST, imports: List[str]) -> str:
+def _anno_parser(node: ast.AST, imports: List[str], disable_from_import: bool) -> str:
     if isinstance(node, ast.Module):
         assert len(node.body) == 1
-        return _anno_parser(node.body[0], imports)
+        return _anno_parser(node.body[0], imports, disable_from_import)
     if isinstance(node, ast.Expr):
-        return _anno_parser(node.value, imports)
+        return _anno_parser(node.value, imports, disable_from_import)
     elif isinstance(node, ast.Subscript):
         assert isinstance(node.value, (ast.Name, ast.Attribute))
         if compat.Python3_9AndLater:
             # >= 3.9 ast.Index is deprecated
             assert isinstance(node.slice, ast.Tuple)
-            return "{}[{}]".format(_anno_parser(node.value, imports),
-                                   _anno_parser(node.slice, imports))
+            return "{}[{}]".format(_anno_parser(node.value, imports, disable_from_import),
+                                   _anno_parser(node.slice, imports, disable_from_import))
         else:
             assert isinstance(node.slice, ast.Index)
             assert isinstance(
                 node.slice.value,
                 (ast.Tuple, ast.Attribute, ast.Name, ast.Subscript))
-            return "{}[{}]".format(_anno_parser(node.value, imports),
-                                   _anno_parser(node.slice.value, imports))
+            return "{}[{}]".format(_anno_parser(node.value, imports, disable_from_import),
+                                   _anno_parser(node.slice.value, imports, disable_from_import))
     elif isinstance(node, ast.Tuple):
-        return ", ".join(_anno_parser(e, imports) for e in node.elts)
+        return ", ".join(_anno_parser(e, imports, disable_from_import) for e in node.elts)
     elif isinstance(node, ast.Name):
         return node.id
     elif isinstance(node, ast.Attribute):
         value_parts = get_attribute_name_parts(node)  # type: List[str]
-        from_import = "from {} import {}".format(".".join(value_parts[:-1]),
-                                                 value_parts[-1])
-        imports.append(from_import)
-        return value_parts[-1]
+        if disable_from_import:
+            regular_import = "import {}".format(value_parts[0])
+            imports.append(regular_import)
+            return ".".join(value_parts)
+        else:
+            from_import = "from {} import {}".format(".".join(value_parts[:-1]),
+                                                    value_parts[-1])
+            imports.append(from_import)
+            return value_parts[-1]
     else:
         msg = "pyanno only support format like name.attr[nested_name.attr[name1, name2], name3]\n"
         msg += "but we get ast node {}".format(ast.dump(node))
@@ -260,11 +265,16 @@ def _simple_template_type_parser(
 
 def python_anno_parser(anno_str: str):
     anno_str = anno_str.strip()
+    disable_from_import = False
+    if anno_str[0] == "~":
+        disable_from_import = True
+        anno_str = anno_str[1:]
+
     if anno_str == "None":
         return "None", []
     tree = ast.parse(anno_str)
     imports = []  # type: List[str]
-    refined_name = _anno_parser(tree, imports)
+    refined_name = _anno_parser(tree, imports, disable_from_import)
     return refined_name, imports
 
 
