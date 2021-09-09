@@ -473,7 +473,8 @@ class PybindClassMixin:
             mw_metas = []
         if prop_name is None:
             prop_name = name 
-        mw_metas.append(Pybind11PropMeta(prop_name, readwrite))
+        for prop_name_part in prop_name.split("."):
+            mw_metas.append(Pybind11PropMeta(prop_name_part, readwrite))
         return self.add_member(name=name,
                                type=type,
                                default=default,
