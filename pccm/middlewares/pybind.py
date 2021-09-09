@@ -473,15 +473,21 @@ class PybindClassMixin:
             mw_metas = []
         if prop_name is None:
             prop_name = name 
-        for prop_name_part in prop_name.split("."):
-            mw_metas.append(Pybind11PropMeta(prop_name_part, readwrite))
-        return self.add_member(name=name,
-                               type=type,
-                               default=default,
-                               array=array,
-                               pyanno=pyanno,
-                               mw_metas=mw_metas)
-
+        name_part = name.split(",")
+        prop_name_part = prop_name.split(",")
+        assert len(name_part) == len(prop_name_part)
+        for name, prop_name in zip(name_part, prop_name_part):
+            name = name.strip()
+            prop_name = prop_name.strip()
+            mw_metas_part = mw_metas.copy()
+            mw_metas_part.append(Pybind11PropMeta(prop_name, readwrite))
+            self.add_member(name=name,
+                            type=type,
+                            default=default,
+                            array=array,
+                            pyanno=pyanno,
+                            mw_metas=mw_metas_part)
+        return
 
 def _postprocess_class(cls_name: str, cls_namespace: str, submod: str,
                        decls: List[Union[PybindMethodDecl, PybindPropDecl]],
