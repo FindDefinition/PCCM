@@ -63,11 +63,11 @@ class ExposeMain(ManualClassGenerator):
         return self.singleton
 
     def get_code_units(self) -> List[Class]:
-        if self.singleton.main_cu is not None:
-            self.singleton.postprocess()
-            return [self.singleton]
-        else:
+        if self.singleton.main_cu is None:
             return []
+
+        self.singleton.postprocess()
+        return [self.singleton]
 
 
 def mark(func=None):

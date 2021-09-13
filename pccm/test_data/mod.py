@@ -103,8 +103,7 @@ class PbTestVirtual(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark
     @pccm.member_function
     def run_virtual_func_0(self):
-        code = pccm.FunctionCode("return func_0();").ret("int")
-        return code
+        return pccm.FunctionCode("return func_0();").ret("int")
 
     @pccm.pybind.mark
     @pccm.member_function

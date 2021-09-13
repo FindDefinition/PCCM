@@ -83,7 +83,7 @@ def postorder_traversal(node: Node, node_map: Dict[str, Node]):
             if namedio.key not in node_map:
                 continue
             inp = node_map[namedio.key]
-            if not inp in visited:
+            if inp not in visited:
                 next_nodes.append(inp)
                 ready = False
         if ready:
@@ -112,11 +112,10 @@ def _cycle_detection(node_map: Dict[str, Node], node: Node, visited: Set[str],
 def cycle_detection(node_map: Dict[str, Node]):
     visited = set()
     trace = set()
-    for node in node_map.values():
-        if node.key not in visited:
-            if _cycle_detection(node_map, visited, trace):
-                return True
-    return False
+    return any(
+        node.key not in visited and _cycle_detection(node_map, visited, trace)
+        for node in node_map.values()
+    )
 
 
 class Graph(object):
@@ -177,10 +176,7 @@ class Graph(object):
     def get_sources_of(self, node: Node):
         assert not self._has_cycle, "graph must be DAG"
         all_sources = set()
-        stack = []
-        for inp in node.inputs:
-            if inp.key in self:
-                stack.append(self[inp.key])
+        stack = [self[inp.key] for inp in node.inputs if inp.key in self]
         while stack:
             n = stack.pop()
             if n in all_sources:
@@ -214,10 +210,7 @@ class Graph(object):
                     for io in n.inputs:
                         if io.key in self:
                             stack.append(self[io.key])
-        for s in all_sources:
-            if s.key in visited:
-                return True
-        return False
+        return any(s.key in visited for s in all_sources)
 
 
 def create_node(key: str, *inputs: List[NamedIO]):

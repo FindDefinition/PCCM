@@ -188,11 +188,11 @@ class TemplateTypeStmt(object):
             return "Any"
         if self.exist_anno:
             return self.exist_anno
-        if self.name in self.NameToHandler:
-            pyanno_generic = self.NameToHandler[self.name](self.args)
-        else:
-            pyanno_generic = "Any"
-        return pyanno_generic
+        return (
+            self.NameToHandler[self.name](self.args)
+            if self.name in self.NameToHandler
+            else "Any"
+        )
 
 
 def _simple_template_type_parser_recursive(
@@ -239,9 +239,8 @@ def _simple_template_type_parser(
     invalid = TemplateTypeStmt("", [], False, True)
     bracket_stack = []  # type: List[Tuple[str, int]]
     N = len(stmt)
-    pos = 0
     bracket_pair = {}  # type: Dict[int, int]
-    while pos < N:
+    for pos in range(N):
         val = stmt[pos]
         if val == "<":
             bracket_stack.append((val, pos))
@@ -250,7 +249,6 @@ def _simple_template_type_parser(
                 return invalid
             start_val, start = bracket_stack.pop()
             bracket_pair[start] = pos
-        pos += 1
     if bracket_stack:
         return invalid
     if "\"" in stmt:
@@ -375,12 +373,11 @@ class PybindMethodDecl(object):
 
     def get_overload_addr(self):
         addr = self.addr
-        arg_types = ", ".join([a.type_str for a in self.decl.code.arguments])
+        arg_types = ", ".join(a.type_str for a in self.decl.code.arguments)
         meta = self.decl.meta
         addr_fmt = "pybind11::overload_cast<{}>({})"
-        if isinstance(meta, MemberFunctionMeta):
-            if meta.const:
-                addr_fmt = "pybind11::overload_cast<{}>({}, pybind11::const_)"
+        if isinstance(meta, MemberFunctionMeta) and meta.const:
+            addr_fmt = "pybind11::overload_cast<{}>({}, pybind11::const_)"
         addr = addr_fmt.format(arg_types, self.addr)
         return addr
 
@@ -425,9 +422,7 @@ class PybindMethodDecl(object):
         if self.decl.meta.pure_virtual:
             fmt = "{} {} {{PYBIND11_OVERRIDE_PURE({}, {}, {}, {});}}"
         post_meta_attrs = self.decl.meta.get_post_attrs()
-        override = ""
-        if "override" not in post_meta_attrs:
-            override = "override"
+        override = "override" if "override" not in post_meta_attrs else ""
         sig_str = self.decl.code.get_sig(self.decl.get_function_name(),
                                          self.decl.meta,
                                          withpost=True,
@@ -453,9 +448,7 @@ class PybindPropDecl(object):
             return self.decl.name
 
     def to_string(self) -> str:
-        def_stmt = "def_readwrite"
-        if not self.mw_meta.readwrite:
-            def_stmt = "def_readonly"
+        def_stmt = "def_readonly" if not self.mw_meta.readwrite else "def_readwrite"
         return ".{}(\"{}\", {})".format(def_stmt, self.mw_meta.name, self.addr)
 
 
@@ -545,11 +538,10 @@ def _postprocess_class(cls_name: str, cls_namespace: str, submod: str,
             setter_prop_name.add(prop_name)
             getter_decl.setter_pybind_decl = decl
 
-    has_constructor = False
-    for d in method_decls:
-        if isinstance(d.decl.meta, ConstructorMeta):
-            has_constructor = True
-            break
+    has_constructor = any(
+        isinstance(d.decl.meta, ConstructorMeta) for d in method_decls
+    )
+
     cls_qual_name = "{}::{}".format(cls_namespace.replace(".", "::"), cls_name)
     cls_def_arguments = [cls_qual_name]
     if has_virtual:
@@ -581,14 +573,12 @@ def _postprocess_class(cls_name: str, cls_namespace: str, submod: str,
             ec_prefix = "pybind11::enum_<{}::{}>({}, \"{}\", pybind11::arithmetic())".format(
                 cls_name, ec.name, cls_def_name, ec.name)
         ec_values = []  # type: List[Union[Block, str]]
-        cnt = 0
-        for key, value in ec.items:
+        for cnt, (key, value) in enumerate(ec.items):
             stmt = ".value(\"{key}\", {class_name}::{enum_name}::{key})".format(
                 key=key, class_name=cls_name, enum_name=ec.name)
             if is_scoped and cnt == len(ec.items) - 1:
                 stmt += ";"
             ec_values.append(stmt)
-            cnt += 1
         if not is_scoped:
             ec_values.append(".export_values();")
         cls_def_stmts.append(Block(ec_prefix, ec_values, ""))
@@ -609,11 +599,13 @@ def _extract_anno_default(
             type_str, exist_annos)
         try_extract_pyanno = try_extract_pyanno_res.to_pyanno()
         if try_extract_pyanno != "Any":
-            if default is None:
-                if cpp_default is not None:
-                    if type_str in _AUTO_ANNO_TYPES_DEFAULT_HANDLER:
-                        handler = _AUTO_ANNO_TYPES_DEFAULT_HANDLER[type_str]
-                        default = handler(cpp_default)
+            if (
+                default is None
+                and cpp_default is not None
+                and type_str in _AUTO_ANNO_TYPES_DEFAULT_HANDLER
+            ):
+                handler = _AUTO_ANNO_TYPES_DEFAULT_HANDLER[type_str]
+                default = handler(cpp_default)
             try_extract_pyanno, from_imports = python_anno_parser(
                 try_extract_pyanno)
             return try_extract_pyanno, from_imports, default
@@ -625,11 +617,13 @@ def _extract_anno_default(
             default = user_anno_type_default[1]
 
         anno, from_imports = python_anno_parser(user_anno_type)
-    if default is None:
-        if cpp_default is not None:
-            if type_str in _AUTO_ANNO_TYPES_DEFAULT_HANDLER:
-                handler = _AUTO_ANNO_TYPES_DEFAULT_HANDLER[type_str]
-                default = handler(cpp_default)
+    if (
+        default is None
+        and cpp_default is not None
+        and type_str in _AUTO_ANNO_TYPES_DEFAULT_HANDLER
+    ):
+        handler = _AUTO_ANNO_TYPES_DEFAULT_HANDLER[type_str]
+        default = handler(cpp_default)
 
     return anno, from_imports, default
 
@@ -648,19 +642,19 @@ def _collect_exist_annos(decls: List[Union[PybindMethodDecl, PybindPropDecl]]):
             prop_decls.append(decl)
     exist_annos = {}  # type: Dict[str, str]
     for prop_decl in prop_decls:
-        prop_type = prop_decl.decl.type_str
         user_anno = prop_decl.decl.pyanno
         if user_anno is not None:
             user_anno_pair = user_anno.split("=")
             user_anno_type = user_anno_pair[0].strip()
+            prop_type = prop_decl.decl.type_str
             exist_annos[prop_type] = user_anno_type
 
     for pydecl in method_decls:
         user_anno = pydecl.decl.code.ret_pyanno
-        ret_type = pydecl.decl.code.return_type
         if user_anno is not None:
             user_anno_pair = user_anno.split("=")
             user_anno_type = user_anno_pair[0].strip()
+            ret_type = pydecl.decl.code.return_type
             exist_annos[ret_type] = user_anno_type
 
         for arg in pydecl.decl.code.arguments:
@@ -701,13 +695,11 @@ def _generate_python_interface_class(cls_name: str,
     )  # type: Dict[str, List[PybindMethodDecl]]
     decl_codes = []  # type: List[Union[Block, str]]
     for prop_decl in prop_decls:
-        prop_anno = "Any"
         prop_type = prop_decl.decl.type_str
         user_anno = prop_decl.decl.pyanno
         anno, from_imports, default = _extract_anno_default(
             user_anno, prop_type, exist_annos)
-        if anno is not None:
-            prop_anno = anno
+        prop_anno = anno if anno is not None else "Any"
         imports.extend(from_imports)
         if prop_anno == cls_name:
             prop_anno = "\"{}\"".format(prop_anno)
@@ -757,11 +749,10 @@ def _generate_python_interface_class(cls_name: str,
                 if default is not None:
                     default_str = " = {}".format(default)
                     have_default = True
-                else:
-                    if have_default:
-                        msg = ("you must provide a python default anno value "
-                               "for {} of {}. format: PythonType = Default")
-                        raise ValueError(msg.format(arg.name, decl_bind_name))
+                elif have_default:
+                    msg = ("you must provide a python default anno value "
+                           "for {} of {}. format: PythonType = Default")
+                    raise ValueError(msg.format(arg.name, decl_bind_name))
                 if user_anno is not None:
                     if user_anno == cls_name:
                         user_anno = "\"{}\"".format(user_anno)
@@ -789,15 +780,10 @@ def _generate_python_interface_class(cls_name: str,
                 fmt.format(decorator, decl_bind_name, py_sig, res_anno, doc))
     # Class EnumName:
     for ec in enum_classes:
-        ec_items = []  # type: List[Union[Block, str]]
-        enum_type = "EnumValue"
-        if ec.scoped:
-            enum_type = "EnumClassValue"
-
+        enum_type = "EnumClassValue" if ec.scoped else "EnumValue"
         prefix = "class {}:".format(ec.name)
-        for key, value in ec.items:
-            ec_items.append("{k} = {ectype}({v}) # type: {ectype}".format(
-                k=key, v=value, ectype=enum_type))
+        ec_items = ["{k} = {ectype}({v}) # type: {ectype}".format(
+                k=key, v=value, ectype=enum_type) for key, value in ec.items]
         def_items = ec_items.copy()
         def_items.append("@staticmethod")
         def_items.append(
@@ -830,8 +816,7 @@ class Pybind11SingleClassHandler(ManualClass):
 
     def get_pybind_decls(
             self) -> List[Union[PybindMethodDecl, PybindPropDecl]]:
-        res = []  # type: List[Union[PybindMethodDecl, PybindPropDecl]]
-        res.extend(self.func_decls)
+        res = list(self.func_decls)
         res.extend(self.prop_decls)
         return res
 
@@ -900,10 +885,7 @@ class Pybind11SplitMain(ParameterizedClass):
             for i in range(1, len(ns_parts) + 1):
                 sub_name = "_".join(ns_parts[:i])
                 sub_ns = ".".join(ns_parts[:i])
-                if i == 1:
-                    parent_name = "m"
-                else:
-                    parent_name = "m_{}".format("_".join(ns_parts[:i - 1]))
+                parent_name = "m" if i == 1 else "m_{}".format("_".join(ns_parts[:i - 1]))
                 if sub_ns not in submodules:
                     stmt = "pybind11::module_ m_{} = {}.def_submodule(\"{}\");".format(
                         sub_name, parent_name, ns_parts[i - 1])
@@ -1008,8 +990,7 @@ class Pybind11SplitImpl(ManualClassGenerator):
         for bind in self.bind_cus:
             bind.postprocess()
         self.main_cu.postprocess(self.bind_cus)
-        res = []  # type: List[Class]
-        res.extend(self.bind_cus)
+        res = list(self.bind_cus)
         res.append(self.main_cu)
         return res
 
@@ -1027,9 +1008,7 @@ def mark(func=None,
          keep_alives: Optional[List[Tuple[int, int]]] = None):
     if virtual:
         assert not nogil, "you can't release gil for python virtual function."
-    call_guard = None  # type: Optional[str]
-    if nogil:
-        call_guard = "pybind11::gil_scoped_release"
+    call_guard = "pybind11::gil_scoped_release" if nogil else None
     pybind_meta = Pybind11MethodMeta(bind_name, method_type, prop_name,
                                      ret_policy, call_guard, virtual,
                                      keep_alives)
