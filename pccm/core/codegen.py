@@ -33,9 +33,7 @@ def generate_code(block: Union[Block, str], start_col_offset: int,
         return [col_str + l for l in block_lines]
     res = []  # type: List[str]
     prefix = block.prefix
-    next_indent = indent
-    if block.indent is not None:
-        next_indent = block.indent
+    next_indent = block.indent if block.indent is not None else indent
     if prefix:
         prefix_lines = prefix.split("\n")
         res.extend([col_str + l for l in prefix_lines])

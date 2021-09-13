@@ -12,11 +12,10 @@ def _unique_list_keep_order(seq: list):
         # https://www.peterbe.com/plog/fastest-way-to-uniquify-a-list-in-python-3.6
         # only python 3.7 language std ensure the preserve-order dict
         return list(dict.fromkeys(seq))
-    else:
-        # https://stackoverflow.com/questions/480214/how-do-you-remove-duplicates-from-a-list-whilst-preserving-order
-        seen = set()
-        seen_add = seen.add
-        return [x for x in seq if not (x in seen or seen_add(x))]
+    # https://stackoverflow.com/questions/480214/how-do-you-remove-duplicates-from-a-list-whilst-preserving-order
+    seen = set()
+    seen_add = seen.add
+    return [x for x in seq if not (x in seen or seen_add(x))]
 
 
 def _merge_compiler_to_flags(this: Dict[str, List[str]],
@@ -66,11 +65,10 @@ class BuildMeta(object):
         merged_ldflags = _merge_compiler_to_flags(self.compiler_to_ldflags,
                                                   other.compiler_to_ldflags)
 
-        res = BuildMeta(
+        return BuildMeta(
             self.includes + other.includes, self.libpaths + other.libpaths,
             _unique_list_keep_order(self.libraries + other.libraries),
             merged_cflags, merged_ldflags)
-        return res
 
     def __radd__(self, other: "BuildMeta"):
         return other.__add__(self)

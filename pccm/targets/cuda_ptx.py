@@ -274,10 +274,7 @@ class Generic(AsmStmt):
         op_strs: List[str] = []
         name_to_op_str: Dict[str, str] = {}
         for op in self.params:
-            if not isinstance(op, list):
-                ops = [op]
-            else:
-                ops = op
+            ops = [op] if not isinstance(op, list) else op
             for op in ops:
                 if isinstance(op, Pointer):
                     # addr
@@ -329,11 +326,10 @@ class Generic(AsmStmt):
                     # else:
                     op_str_with_packed = "{{{}}}".format(
                         ", ".join(op_strs_regs))
+            elif not isinstance(op, (str, int)):
+                op_str_with_packed = name_to_op_str[op.name]
             else:
-                if not isinstance(op, (str, int)):
-                    op_str_with_packed = name_to_op_str[op.name]
-                else:
-                    op_str_with_packed = str(op)
+                op_str_with_packed = str(op)
             op_strs.append(op_str_with_packed)
         if self.pred_reg:
             return "@{} {} {};".format(self.pred_reg, self.stmt,
@@ -435,11 +431,10 @@ class PTXContext:
                   cache_op: Optional[Union[CacheOpLd, CacheOpSt]]):
         if not addr.is_input:
             addr.is_input = is_ld
-        if is_ld:
-            if cache_op is not None:
+        if cache_op is not None:
+            if is_ld:
                 assert isinstance(cache_op, CacheOpLd)
-        else:
-            if cache_op is not None:
+            else:
                 assert isinstance(cache_op, CacheOpSt)
 
         if not isinstance(regs, list):
@@ -497,10 +492,7 @@ class PTXContext:
     def mov(self, dst: REG_OPERAND_TYPES,
             srcs: Union[List[REG_INPUT_OPERAND_TYPES],
                         REG_INPUT_OPERAND_TYPES]):
-        if not isinstance(srcs, list):
-            srcs_check = [srcs]
-        else:
-            srcs_check = srcs
+        srcs_check = [srcs] if not isinstance(srcs, list) else srcs
         for src in srcs_check:
             if not isinstance(src, (str, int)):
                 src.is_input = True
@@ -568,15 +560,11 @@ class PTXContext:
         asm_input_strs: List[str] = []
         # TODO check all ops with same name, they must have same type.
         for op in all_outputs:
-            op_has_input = False
-            for op_same_name in name_to_operands[op.name]:
-                if op_same_name.is_input:
-                    op_has_input = True
-                    break
-            if op_has_input:
-                constraint_letter = "+"
-            else:
-                constraint_letter = "="
+            op_has_input = any(
+                op_same_name.is_input for op_same_name in name_to_operands[op.name]
+            )
+
+            constraint_letter = "+" if op_has_input else "="
             asm_output_strs.append("\"{}{}\"({})".format(
                 constraint_letter, op.get_inline_asm_dtype(), op.name))
         for op in all_inputs:
@@ -586,9 +574,11 @@ class PTXContext:
         inputs_str = ", ".join(asm_input_strs)
         stmt_prefix = "            "
         asm_stmts_str = "\n".join(
-            [stmt_prefix + "\"  {}\\n\"".format(s) for s in stmt_strs])
-        if len(asm_output_strs) == 0:
-            if len(asm_input_strs) == 0 and len(stmt_strs) == 0:
+            stmt_prefix + "\"  {}\\n\"".format(s) for s in stmt_strs
+        )
+
+        if not asm_output_strs:
+            if not asm_input_strs and not stmt_strs:
                 return ""
             return """
             asm volatile (

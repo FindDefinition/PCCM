@@ -313,9 +313,7 @@ class EnumClass(object):
         self.scoped = scoped
 
     def to_string(self) -> str:
-        scoped_str = ""
-        if self.scoped:
-            scoped_str = "class"
+        scoped_str = "class" if self.scoped else ""
         prefix = "enum {} {} {{".format(scoped_str, self.name)
         if self.base_type:
             prefix = "enum {} {}: {} {{".format(scoped_str, self.name,
@@ -362,13 +360,12 @@ class Member(Argument):
             else:
                 return "{}{} {} = {};".format(doc, self.type_str, self.name,
                                               self.default)
+        elif self.default is None:
+            return "{}{} {}{};".format(doc, self.type_str, self.name,
+                                       self.array)
         else:
-            if self.default is None:
-                return "{}{} {}{};".format(doc, self.type_str, self.name,
-                                           self.array)
-            else:
-                return "{}{} {}{} = {};".format(doc, self.type_str, self.name,
-                                                self.array, self.default)
+            return "{}{} {}{} = {};".format(doc, self.type_str, self.name,
+                                            self.array, self.default)
 
 
 class TemplateTypeArgument(object):
@@ -535,18 +532,10 @@ class FunctionCode(object):
         return ", ".join(map(str, args))
 
     def _clean_pre_attrs_impl(self, attrs: List[str]):
-        res_attrs = []  # type: List[str]
-        for attr in attrs:
-            if attr not in _HEADER_ONLY_PRE_ATTRS:
-                res_attrs.append(attr)
-        return res_attrs
+        return [attr for attr in attrs if attr not in _HEADER_ONLY_PRE_ATTRS]
 
     def _clean_post_attrs_impl(self, attrs: List[str]):
-        res_attrs = []  # type: List[str]
-        for attr in attrs:
-            if attr not in _HEADER_ONLY_POST_ATTRS:
-                res_attrs.append(attr)
-        return res_attrs
+        return [attr for attr in attrs if attr not in _HEADER_ONLY_POST_ATTRS]
 
     def get_sig(self,
                 name: str,
@@ -565,9 +554,8 @@ class FunctionCode(object):
         return_type = self.return_type
         if isinstance(meta, (ConstructorMeta, DestructorMeta)):
             return_type = ""
-        else:
-            if not header_only:
-                assert self.return_type != "auto" and self.return_type != "decltype(auto)"
+        elif not header_only:
+            assert self.return_type not in ["auto", "decltype(auto)"]
         fmt = "{ret_type} {name}({args})"
         if withpost:
             fmt += "{post_attrs}"
@@ -650,8 +638,7 @@ class FunctionCode(object):
                                 post_attrs=post_attrs_str)
         if pre_attrs_str:
             prefix_fmt = pre_attrs_str + " " + prefix_fmt
-        blocks = []  # List[Union[Block, str]]
-        blocks.extend(self._blocks)
+        blocks = list(self._blocks)
         block = Block(template_fmt + prefix_fmt, blocks, "}")
         if meta.macro_guard is not None:
             block = Block("#if {}".format(meta.macro_guard), [block], "#endif")
@@ -972,15 +959,18 @@ class Class(object):
                 member_decl_count[cpp_func_name] += 1
         for decl in self._function_decls:
             cpp_func_name = decl.get_function_name()
-            if isinstance(decl.meta, ExternalFunctionMeta):
-                if extend_decl_count[cpp_func_name] > 1:
-                    decl.is_overload = True
-            elif isinstance(decl.meta, StaticMemberFunctionMeta):
-                if static_member_decl_count[cpp_func_name] > 1:
-                    decl.is_overload = True
-            elif isinstance(decl.meta, MemberFunctionMeta):
-                if member_decl_count[cpp_func_name] > 1:
-                    decl.is_overload = True
+            if (
+                isinstance(decl.meta, ExternalFunctionMeta)
+                and extend_decl_count[cpp_func_name] > 1
+                or not isinstance(decl.meta, ExternalFunctionMeta)
+                and isinstance(decl.meta, StaticMemberFunctionMeta)
+                and static_member_decl_count[cpp_func_name] > 1
+                or not isinstance(decl.meta, ExternalFunctionMeta)
+                and not isinstance(decl.meta, StaticMemberFunctionMeta)
+                and isinstance(decl.meta, MemberFunctionMeta)
+                and member_decl_count[cpp_func_name] > 1
+            ):
+                decl.is_overload = True
 
     def add_dependency(self, *no_param_class_cls: Type["Class"]):
         # TODO enable name alias for Class
@@ -1134,7 +1124,7 @@ class Class(object):
                    for d in self.get_common_deps())
         return res
 
-    def get_parent_class(self):  # -> Optional[Type["Class"]]
+    def get_parent_class(self):    # -> Optional[Type["Class"]]
         """TODO find a better way to check invalid param class inherit
         """
         if type(self) is Class:
@@ -1145,24 +1135,23 @@ class Class(object):
             base = candidates.pop()
             if issubclass(base, Class):
                 cls_meta = get_class_meta(base)
-                if cls_meta is None:
-                    pccm_base_types.append(base)
+                if cls_meta is not None and cls_meta.skip_inherit:
+                    candidates.extend(base.__bases__)
                 else:
-                    if cls_meta.skip_inherit:
-                        candidates.extend(base.__bases__)
-                    else:
-                        pccm_base_types.append(base)
+                    pccm_base_types.append(base)
         assert len(pccm_base_types) == 1, "you can only inherit one class."
         pccm_base = pccm_base_types[0]
-        if pccm_base is not Class and base is not ParameterizedClass:
-            # assert not issubclass(mro[1], ParameterizedClass), "you can't inherit a param class."
-            if not issubclass(pccm_base, ParameterizedClass):
-                # you inherit a class. you must set _this_cls_type by self.set_this_class_type(__class__)
-                msg = (
-                    "you must use self.set_this_class_type(__class__) to init this class type"
-                    " when you inherit pccm.Class")
-                assert self._this_cls_type is not None, msg
-                return pccm_base
+        if (
+            pccm_base is not Class
+            and base is not ParameterizedClass
+            and not issubclass(pccm_base, ParameterizedClass)
+        ):
+            # you inherit a class. you must set _this_cls_type by self.set_this_class_type(__class__)
+            msg = (
+                "you must use self.set_this_class_type(__class__) to init this class type"
+                " when you inherit pccm.Class")
+            assert self._this_cls_type is not None, msg
+            return pccm_base
         return None
 
     def get_class_deps(self) -> List[Type["Class"]]:
@@ -1232,16 +1221,12 @@ class Class(object):
             d.to_string() for d in self._members
             if d.cls_type is self._this_cls_type
         ]
-        parent_class_alias = None  # type: Optional[str]
         parent = self.get_parent_class()
-        if parent is not None:
-            # TODO better way to get alias name
-            parent_class_alias = parent.__name__
-        cdef = CodeSectionClassDef(cu_name, dep_alias, self._code_before_class,
+        parent_class_alias = parent.__name__ if parent is not None else None
+        return CodeSectionClassDef(cu_name, dep_alias, self._code_before_class,
                                    self._code_after_class, ext_decls, ec_strs,
                                    typedef_strs, sc_strs, member_func_decls,
                                    member_def_strs, parent_class_alias)
-        return cdef
 
     def get_common_deps(self) -> List["Class"]:
         assert self.graph_inited, "you must build dependency graph before generate code"
@@ -1304,13 +1289,12 @@ class CodeSection(abc.ABC):
         if namespace == "":
             return [], []
         namespace_parts = namespace.split(".")
-        namespace_before = []  # type: List[str]
-        namespace_after = []  # type: List[str]
+        namespace_before = ["namespace {} {{".format(p) for p in namespace_parts]
+        namespace_after = [
+            "}} // namespace {}".format(p) for p in namespace_parts[::-1]
+        ]
 
-        for p in namespace_parts:
-            namespace_before.append("namespace {} {{".format(p))
-        for p in namespace_parts[::-1]:
-            namespace_after.append("}} // namespace {}".format(p))
+
         return namespace_before, namespace_after
 
 
@@ -1394,8 +1378,7 @@ class CodeSectionClassDef(CodeSection):
             prefix = code_before_cls + [
                 "struct {class_name} {{".format(class_name=self.class_name)
             ]
-        block = Block("\n".join(prefix), class_contents, "};")
-        return block
+        return Block("\n".join(prefix), class_contents, "};")
 
 
 class CodeSectionImpl(CodeSection):
@@ -1438,9 +1421,9 @@ def extract_module_id_of_class(
         relative_path = path.relative_to(Path(root))
         import_parts = list(relative_path.parts)
         import_parts[-1] = relative_path.stem
+    elif loader.locate_top_package(path) is None:
+        return None
     else:
-        if loader.locate_top_package(path) is None:
-            return None
         import_parts = loader.try_capture_import_parts(path, None)
     return ".".join(import_parts)
 
@@ -1533,34 +1516,34 @@ class CodeGenerator(object):
         new_uid_to_cu = OrderedDict()  # type: Dict[str, Class]
         for middleware in self.middlewares:
             mw_type = type(middleware)
-            if isinstance(middleware, ManualClassGenerator):
-                for k, cu in uid_to_cu.items():
-                    decls_with_meta = [
-                    ]  # type: List[Tuple[FunctionDecl, MiddlewareMeta]]
-                    members_with_meta = [
-                    ]  # type: List[Tuple[Member, MiddlewareMeta]]
-                    # TODO only one meta is allowed
-                    for decl in cu._function_decls:
-                        for mw_meta in decl.meta.mw_metas:
-                            if mw_meta.type is mw_type:
-                                decls_with_meta.append((decl, mw_meta))
-                    for member in cu._members:
-                        for mw_meta in member.mw_metas:
-                            if mw_meta.type is mw_type:
-                                members_with_meta.append((member, mw_meta))
-                    if not decls_with_meta and not members_with_meta:
-                        continue
-                    new_pcls = middleware.create_manual_class(cu)
-                    if new_pcls.namespace is None:
-                        new_pcls.namespace = cu.namespace + "." + middleware.subnamespace
-                    for decl, mw_meta in decls_with_meta:
-                        new_pcls.handle_function_decl(cu, decl, mw_meta)
-                    for member, mw_meta in members_with_meta:
-                        new_pcls.handle_member(cu, member, mw_meta)
-                    uid = new_pcls.namespace + "-" + type(new_pcls).__name__
-                    new_uid_to_cu[uid] = new_pcls
-            else:
+            if not isinstance(middleware, ManualClassGenerator):
                 raise NotImplementedError
+
+            for k, cu in uid_to_cu.items():
+                decls_with_meta = [
+                ]  # type: List[Tuple[FunctionDecl, MiddlewareMeta]]
+                members_with_meta = [
+                ]  # type: List[Tuple[Member, MiddlewareMeta]]
+                # TODO only one meta is allowed
+                for decl in cu._function_decls:
+                    for mw_meta in decl.meta.mw_metas:
+                        if mw_meta.type is mw_type:
+                            decls_with_meta.append((decl, mw_meta))
+                for member in cu._members:
+                    for mw_meta in member.mw_metas:
+                        if mw_meta.type is mw_type:
+                            members_with_meta.append((member, mw_meta))
+                if not decls_with_meta and not members_with_meta:
+                    continue
+                new_pcls = middleware.create_manual_class(cu)
+                if new_pcls.namespace is None:
+                    new_pcls.namespace = cu.namespace + "." + middleware.subnamespace
+                for decl, mw_meta in decls_with_meta:
+                    new_pcls.handle_function_decl(cu, decl, mw_meta)
+                for member, mw_meta in members_with_meta:
+                    new_pcls.handle_member(cu, member, mw_meta)
+                uid = new_pcls.namespace + "-" + type(new_pcls).__name__
+                new_uid_to_cu[uid] = new_pcls
 
     def build_graph(self,
                     cus: List[Union[Class, ParameterizedClass]],
