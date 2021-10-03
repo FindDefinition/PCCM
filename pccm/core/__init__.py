@@ -334,7 +334,6 @@ class EnumClass(object):
 
 class Member(Argument):
     def __init__(self,
-                 cls_type,
                  name: str,
                  type: str,
                  default: Optional[str] = None,
@@ -346,7 +345,6 @@ class Member(Argument):
         if mw_metas is None:
             mw_metas = []
         self.mw_metas = mw_metas
-        self.cls_type = cls_type  # type: Optional[Type[Class]]
 
     def to_string(self) -> str:
         doc = ""
@@ -444,6 +442,10 @@ class FunctionCode(object):
 
         self._additional_pre_attrs = []  # type: List[str]
 
+        self._impl_only_deps: List[Type[Class]] = []
+        self._impl_only_pdeps: List[Tuple[str, "ParameterizedClass",
+                                          Optional[str]]] = []
+
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0
 
@@ -462,6 +464,29 @@ class FunctionCode(object):
                     break
         self._blocks[-1].body.append("\n".join(l[min_indent:] for l in lines))
         return self
+
+    def add_dependency(self, *no_param_class_cls: Type["Class"]):
+        """another method to add impl-only dependency.
+        """
+        for npcls in no_param_class_cls:
+            if issubclass(npcls, ParameterizedClass):
+                raise ValueError(
+                    "you can't use class inherit from param class as"
+                    " a dependency. use add_param_class instead.")
+            self._impl_only_deps.append(npcls)
+
+    def add_param_class(self,
+                        subnamespace: str,
+                        param_class: "ParameterizedClass",
+                        name_alias: Optional[str] = None):
+        """another method to add impl-only param class dependency.
+        """
+        # TODO check alias is unique
+        if not isinstance(param_class, ParameterizedClass):
+            msg = "can only add Param Class, but your {} is Class".format(
+                param_class.class_name)
+            raise ValueError(msg)
+        self._impl_only_pdeps.append((subnamespace, param_class, name_alias))
 
     @contextlib.contextmanager
     def block(self, prefix: str):
@@ -597,7 +622,8 @@ class FunctionCode(object):
             prefix_fmt = pre_attrs_str + " " + prefix_fmt
         doc = self.generate_cpp_doc()
         if meta.macro_guard is not None:
-            return doc + "\n" + "#if {}\n".format(meta.macro_guard) + template_fmt + prefix_fmt + "\n#endif"
+            return doc + "\n" + "#if {}\n".format(
+                meta.macro_guard) + template_fmt + prefix_fmt + "\n#endif"
         else:
             return doc + "\n" + template_fmt + prefix_fmt
 
@@ -794,8 +820,7 @@ class Class(object):
     TODO add alias for non-param Class
     TODO add param class resume if class provide hash method
     TODO support dynamic method
-
-    TODO handle inherited codes
+    TODO add convenient method to inherit base methods/typedefs/consts
     """
     def __init_subclass__(cls) -> None:
         """make c++ meta adding code know which class call 
@@ -816,66 +841,90 @@ class Class(object):
         """
         return getattr(self, PCCM_INIT_DECORATOR_KEY, None)
 
-    def __init__(self):
-        self._this_cls_type = None  # type: Optional[Type[Class]]
+    def set_this_class_type(self, this_cls_type: Type["Class"]):
+        """get current Class Type during c++ constructing functions
+        like add_member.
+        """
+        return setattr(self, PCCM_INIT_DECORATOR_KEY, this_cls_type)
 
-        self._members = []  # type: List[Member]
+    def __init__(self):
+        # self._members = []  # type: List[Member]
         self._this_type_to_members = {
-            self._this_cls_type: []
+            None: []
         }  # type: Dict[Optional[Type[Class]], List[Member]]
 
-        self._param_class = OrderedDict(
-        )  # type: OrderedDict[str, List[Tuple[ParameterizedClass, Optional[str]]]]
+        # self._param_class = OrderedDict(
+        # )  # type: OrderedDict[str, List[Tuple[ParameterizedClass, Optional[str]]]]
 
         self._this_type_to_param_class = {
-            self._this_cls_type: OrderedDict()
+            None: OrderedDict()
         }  # type: Dict[Optional[Type[Class]], Dict[str, ParameterizedClass]]
 
         self._this_type_to_param_class_alias = {
-            self._this_cls_type: OrderedDict()
+            None: OrderedDict()
         }  # type: Dict[Optional[Type[Class]], Dict[str, str]]
 
-        self._typedefs = []  # type: List[Typedef]
+        # self._typedefs = []  # type: List[Typedef]
 
         self._this_type_to_typedefs = {
-            self._this_cls_type: []
+            None: []
         }  # type: Dict[Optional[Type[Class]], List[Typedef]]
 
-        self._static_consts = []  # type: List[StaticConst]
-        self._enum_classes = []  # type: List[EnumClass]
+        # self._static_consts = []  # type: List[StaticConst]
+        # self._enum_classes = []  # type: List[EnumClass]
         self._this_type_to_static_consts = {
-            self._this_cls_type: []
+            None: []
         }  # type: Dict[Optional[Type[Class]], List[StaticConst]]
+        self._this_type_to_enum_classes = {
+            None: []
+        }  # type: Dict[Optional[Type[Class]], List[EnumClass]]
 
-        self._code_before_class = []  # type: List[str]
-        self._code_after_class = []  # type: List[str]
+        # self._code_before_class = []  # type: List[str]
+        # self._code_after_class = []  # type: List[str]
 
         self._this_type_to_code_before_class = {
-            self._this_cls_type: []
+            None: []
         }  # type: Dict[Optional[Type[Class]], List[str]]
         self._this_type_to_code_after_class = {
-            self._this_cls_type: []
+            None: []
         }  # type: Dict[Optional[Type[Class]], List[str]]
 
-        self._includes = []  # type: List[str]
+        # self._includes = []  # type: List[str]
         self._this_type_to_includes = {
-            self._this_cls_type: []
+            None: []
         }  # type: Dict[Optional[Type[Class]], List[str]]
 
         # TODO we can't use set here because we need to keep order of deps
-        self._deps = []  # type: List[Type[Class]]
+        # self._deps = []  # type: List[Type[Class]]
 
         self._this_type_to_deps = {
-            self._this_cls_type: []
+            None: []
         }  # type: Dict[Optional[Type[Class]], List[Type[Class]]]
 
-        self._impl_mains = OrderedDict(
-        )  # type: Dict[str, Tuple[str, List[str]]]
-        self._global_codes = []  # type: List[str]
-        self._impl_only_cls_dep = OrderedDict(
-        )  # type: OrderedDict[str, List[Type[Class]]]
-        self._impl_only_param_cls_dep = OrderedDict(
-        )  # type: OrderedDict[str, List[ParameterizedClass]]
+        # self._impl_mains = OrderedDict(
+        # )  # type: Dict[str, Tuple[str, List[str]]]
+        # self._global_codes = []  # type: List[str]
+        # self._impl_only_cls_dep = OrderedDict(
+        # )  # type: OrderedDict[str, List[Type[Class]]]
+        # self._impl_only_param_cls_dep = OrderedDict(
+        # )  # type: OrderedDict[str, List[ParameterizedClass]]
+        self._this_type_to_impl_mains = {
+            None: OrderedDict()
+        }  # type: Dict[Optional[Type[Class]], Dict[str, Tuple[str, List[str]]]]
+        self._this_type_to_global_codes = {
+            None: []
+        }  # type: Dict[Optional[Type[Class]], List[str]]
+        self._this_type_to_impl_only_cls_dep = {
+            None: OrderedDict()
+        }  # type: Dict[Optional[Type[Class]], OrderedDict[str, List[Type[Class]]]]
+        self._this_type_to_impl_only_param_cls_dep = {
+            None: OrderedDict()
+        }  # type: Dict[Optional[Type[Class]], Dict[Optional[Type[Class]], Dict[str, Tuple[str, List[str]]]]]
+
+        self._this_type_to_manual_parent = {
+            None: ""
+        }  # type: Dict[Optional[Type[Class]], str]
+
         self._build_meta = BuildMeta()
 
         # filled during graph building
@@ -886,14 +935,116 @@ class Class(object):
         self._parent_class_checked = False  # type: bool
         self._user_provided_class_name = None  # type: Optional[str]
 
-    def set_this_class_type(self, this_cls_type: Type["Class"]):
-        self._this_cls_type = this_cls_type
+    def set_manual_parent(self, val: str):
+        assert len(val) > 0
+        self._manual_parent = val
 
-    def _check_this_class(self):
-        # make sure user call self.set_this_class_type(__class__)
-        if not self._parent_class_checked:
-            self.get_parent_class()
-            self._parent_class_checked = True
+    @property
+    def _members(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_members:
+            self._this_type_to_members[this_type] = []
+        return self._this_type_to_members[this_type]
+
+    @property
+    def _param_class(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_param_class:
+            self._this_type_to_param_class[this_type] = OrderedDict()
+        return self._this_type_to_param_class[this_type]
+
+    @property
+    def _typedefs(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_typedefs:
+            self._this_type_to_typedefs[this_type] = []
+
+        return self._this_type_to_typedefs[this_type]
+
+    @property
+    def _static_consts(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_static_consts:
+            self._this_type_to_static_consts[this_type] = []
+        return self._this_type_to_static_consts[this_type]
+
+    @property
+    def _enum_classes(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_enum_classes:
+            self._this_type_to_enum_classes[this_type] = []
+
+        return self._this_type_to_enum_classes[this_type]
+
+    @property
+    def _code_before_class(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_code_before_class:
+            self._this_type_to_code_before_class[this_type] = []
+
+        return self._this_type_to_code_before_class[this_type]
+
+    @property
+    def _code_after_class(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_code_after_class:
+            self._this_type_to_code_after_class[this_type] = []
+
+        return self._this_type_to_code_after_class[this_type]
+
+    @property
+    def _includes(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_includes:
+            self._this_type_to_includes[this_type] = []
+        return self._this_type_to_includes[this_type]
+
+    @property
+    def _deps(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_deps:
+            self._this_type_to_deps[this_type] = []
+        return self._this_type_to_deps[this_type]
+
+    @property
+    def _impl_mains(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_impl_mains:
+            self._this_type_to_impl_mains[this_type] = OrderedDict()
+        return self._this_type_to_impl_mains[this_type]
+
+    @property
+    def _global_codes(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_global_codes:
+            self._this_type_to_global_codes[this_type] = []
+        return self._this_type_to_global_codes[this_type]
+
+    @property
+    def _impl_only_cls_dep(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_impl_only_cls_dep:
+            self._this_type_to_impl_only_cls_dep[this_type] = OrderedDict()
+        return self._this_type_to_impl_only_cls_dep[this_type]
+
+    @property
+    def _impl_only_param_cls_dep(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_impl_only_param_cls_dep:
+            self._this_type_to_impl_only_param_cls_dep[
+                this_type] = OrderedDict()
+        return self._this_type_to_impl_only_param_cls_dep[this_type]
+
+    @property
+    def _manual_parent(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_manual_parent:
+            self._this_type_to_manual_parent[this_type] = ""
+        return self._this_type_to_manual_parent[this_type]
+
+    @_manual_parent.setter
+    def _manual_parent(self, val: str):
+        self._this_type_to_manual_parent[self.__get_this_type()] = val
 
     @property
     def build_meta(self) -> BuildMeta:
@@ -916,6 +1067,12 @@ class Class(object):
     @namespace.setter
     def namespace(self, val: str):
         self._namespace = val
+
+    @property
+    def canonical_name(self):
+        assert self._namespace is not None
+        return "{}::{}".format("::".join(self._namespace.split(".")),
+                               self.class_name)
 
     @property
     def graph_inited(self) -> bool:
@@ -944,8 +1101,8 @@ class Class(object):
             if not part.strip():
                 raise ValueError("you provide a empty name in", name)
             self._members.append(
-                Member(self._this_cls_type, part.strip(), type, default, array,
-                       pyanno, mw_metas, doc))
+                Member(part.strip(), type, default, array, pyanno, mw_metas,
+                       doc))
 
     def _check_graph_init(self):
         # TODO if we have middleware that modify Class?
@@ -1017,7 +1174,8 @@ class Class(object):
             func_meta = get_func_meta_except(func)
             if func_meta.inline:
                 raise ValueError("inline function can't have impl-only dep")
-            name = func.__name__
+            name = func_meta.name
+            assert name is not None, "this shouldn't happen"
             if name not in self._impl_only_cls_dep:
                 self._impl_only_cls_dep[name] = []
             for npcls in no_param_class_cls:
@@ -1157,13 +1315,28 @@ class Class(object):
         if pccm_base is not Class and base is not ParameterizedClass:
             # assert not issubclass(mro[1], ParameterizedClass), "you can't inherit a param class."
             if not issubclass(pccm_base, ParameterizedClass):
-                # you inherit a class. you must set _this_cls_type by self.set_this_class_type(__class__)
+                # you inherit a class.
+                this_type = self.__get_this_type()
                 msg = (
                     "you must use self.set_this_class_type(__class__) to init this class type"
                     " when you inherit pccm.Class")
-                assert self._this_cls_type is not None, msg
+                assert this_type is not None, msg
                 return pccm_base
         return None
+
+    def get_parent_name(self) -> str:
+        if self._manual_parent:
+            return self._manual_parent
+        assert self.graph_inited, "you can only use this method AFTER graph inited"
+        parent = self.get_parent_class()
+        if parent is None:
+            return ""
+        # we can only get type of Class, so we need to iterate unified deps to
+        # avoid construct Class instance.
+        for dep in self._unified_deps:
+            if type(dep) is parent:
+                return dep.canonical_name
+        return ""
 
     def get_class_deps(self) -> List[Type["Class"]]:
         res = list(self._deps)
@@ -1228,15 +1401,15 @@ class Class(object):
         sc_strs = [d.to_string() for d in self._static_consts]
         ec_strs = [d.to_string() for d in self._enum_classes]
 
-        member_def_strs = [
-            d.to_string() for d in self._members
-            if d.cls_type is self._this_cls_type
-        ]
+        member_def_strs = [d.to_string() for d in self._members]
         parent_class_alias = None  # type: Optional[str]
-        parent = self.get_parent_class()
-        if parent is not None:
-            # TODO better way to get alias name
-            parent_class_alias = parent.__name__
+        if self._manual_parent:
+            parent_class_alias = self._manual_parent
+        else:
+            parent = self.get_parent_class()
+            if parent is not None:
+                # TODO better way to get alias name
+                parent_class_alias = parent.__name__
         cdef = CodeSectionClassDef(cu_name, dep_alias, self._code_before_class,
                                    self._code_after_class, ext_decls, ec_strs,
                                    typedef_strs, sc_strs, member_func_decls,
@@ -1524,7 +1697,7 @@ class CodeGenerator(object):
 
         self._get_members_cache = {}  # type: Dict[Type[Class], Any]
         self._get_decls_cache = {
-        }  # type: Dict[Union[Type[Class], ParameterizedClass], Any]
+        }  # type: Dict[Union[Type[Class], ParameterizedClass], list[FunctionDecl]]
 
         self.cu_type_to_cu = {}  # type: Dict[Type[Class], Class]
 
@@ -1580,7 +1753,7 @@ class CodeGenerator(object):
         # 1. build dependency graph
 
         all_cus = set()  # type: Set[Class]
-        cu_type_to_cu = self.cu_type_to_cu
+        cu_type_to_cu: Dict[Type[Class], Class] = self.cu_type_to_cu
         for cu in cus:
             if isinstance(cu,
                           Class) and not isinstance(cu, ParameterizedClass):
@@ -1591,6 +1764,7 @@ class CodeGenerator(object):
                 cu_type_to_cu[cu_type] = cu
                 if cu.namespace is None:
                     cu.namespace = extract_module_id_of_class(cu_type, root)
+        # uid_to_cu order: leaf to root
         uid_to_cu = OrderedDict()  # type: Dict[str, Class]
         for cu in cus:
             stack = [(cu, set())]  # type: List[Tuple[Class, Set[Type[Class]]]]
@@ -1604,6 +1778,17 @@ class CodeGenerator(object):
                 all_cus.add(cur_cu_type)
                 # construct unified dependency and assign namespace for Class
                 if not cur_cu.graph_inited:
+                    # extract deps in code object
+                    for decl in self.cached_extract_classunit_methods(cur_cu):
+                        code_obj = decl.code
+                        # decl.meta.name
+                        for dep in code_obj._impl_only_deps:
+                            cur_cu.add_impl_only_dependency_by_name(
+                                decl.meta.name, dep)
+                        for (subns, pcls, alias) in code_obj._impl_only_pdeps:
+                            cur_cu.add_impl_only_param_class_by_name(
+                                decl.meta.name, subns, pcls, alias)
+
                     for dep in cur_cu.get_class_deps():
                         if dep in cur_type_trace:
                             raise ValueError("cycle detected")
@@ -1639,6 +1824,8 @@ class CodeGenerator(object):
                         cur_type_trace_copy = cur_type_trace.copy()
                         cur_type_trace_copy.add(type(dep))
                         stack.append((dep, cur_type_trace_copy))
+        # make uid_to_cu reversed, i.e. from leaf-root to root-leaf
+        uid_to_cu = OrderedDict(reversed(uid_to_cu.items()))
         if run_middleware:
             self._apply_middleware_to_cus(uid_to_cu)
         return list(uid_to_cu.values())

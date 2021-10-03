@@ -49,7 +49,6 @@ class Test3(pccm.Class):
 class Test4(Test3):
     def __init__(self):
         super().__init__()
-        self.set_this_class_type(__class__)
 
     @pccm.pybind.mark(nogil=True)
     @pccm.member_function(inline=True)

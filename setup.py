@@ -17,7 +17,7 @@ DESCRIPTION = 'Python C++ Code Manager.'
 URL = 'https://github.com/FindDefinition/PCCM'
 EMAIL = 'yanyan.sub@outlook.com'
 AUTHOR = 'Yan Yan'
-REQUIRES_PYTHON = '>=3.5'
+REQUIRES_PYTHON = '>=3.6'
 VERSION = None
 
 # What packages are required for this module to be executed?

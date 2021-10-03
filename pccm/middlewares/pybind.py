@@ -65,7 +65,8 @@ def get_attribute_name_parts(node):
     return parts[::-1]
 
 
-def _anno_parser(node: ast.AST, imports: List[str], disable_from_import: bool) -> str:
+def _anno_parser(node: ast.AST, imports: List[str],
+                 disable_from_import: bool) -> str:
     if isinstance(node, ast.Module):
         assert len(node.body) == 1
         return _anno_parser(node.body[0], imports, disable_from_import)
@@ -76,17 +77,20 @@ def _anno_parser(node: ast.AST, imports: List[str], disable_from_import: bool) -
         if compat.Python3_9AndLater:
             # >= 3.9 ast.Index is deprecated
             assert isinstance(node.slice, ast.Tuple)
-            return "{}[{}]".format(_anno_parser(node.value, imports, disable_from_import),
-                                   _anno_parser(node.slice, imports, disable_from_import))
+            return "{}[{}]".format(
+                _anno_parser(node.value, imports, disable_from_import),
+                _anno_parser(node.slice, imports, disable_from_import))
         else:
             assert isinstance(node.slice, ast.Index)
             assert isinstance(
                 node.slice.value,
                 (ast.Tuple, ast.Attribute, ast.Name, ast.Subscript))
-            return "{}[{}]".format(_anno_parser(node.value, imports, disable_from_import),
-                                   _anno_parser(node.slice.value, imports, disable_from_import))
+            return "{}[{}]".format(
+                _anno_parser(node.value, imports, disable_from_import),
+                _anno_parser(node.slice.value, imports, disable_from_import))
     elif isinstance(node, ast.Tuple):
-        return ", ".join(_anno_parser(e, imports, disable_from_import) for e in node.elts)
+        return ", ".join(
+            _anno_parser(e, imports, disable_from_import) for e in node.elts)
     elif isinstance(node, ast.Name):
         return node.id
     elif isinstance(node, ast.Attribute):
@@ -96,8 +100,8 @@ def _anno_parser(node: ast.AST, imports: List[str], disable_from_import: bool) -
             imports.append(regular_import)
             return ".".join(value_parts)
         else:
-            from_import = "from {} import {}".format(".".join(value_parts[:-1]),
-                                                    value_parts[-1])
+            from_import = "from {} import {}".format(
+                ".".join(value_parts[:-1]), value_parts[-1])
             imports.append(from_import)
             return value_parts[-1]
     else:
@@ -327,7 +331,7 @@ class Pybind11PropMeta(Pybind11Meta):
     def __init__(self, name: str, readwrite: bool = True):
         super().__init__(Pybind11SplitImpl)
         self.readwrite = readwrite
-        self.name = name 
+        self.name = name
 
 
 class PybindMethodDecl(object):
@@ -472,7 +476,7 @@ class PybindClassMixin:
         if mw_metas is None:
             mw_metas = []
         if prop_name is None:
-            prop_name = name 
+            prop_name = name
         name_part = name.split(",")
         prop_name_part = prop_name.split(",")
         assert len(name_part) == len(prop_name_part)
@@ -489,9 +493,13 @@ class PybindClassMixin:
                             mw_metas=mw_metas_part)
         return
 
-def _postprocess_class(cls_name: str, cls_namespace: str, submod: str,
+
+def _postprocess_class(cls_name: str,
+                       cls_namespace: str,
+                       submod: str,
                        decls: List[Union[PybindMethodDecl, PybindPropDecl]],
-                       enum_classes: List[EnumClass]):
+                       enum_classes: List[EnumClass],
+                       parent_ns: str = ""):
     has_virtual = False
     vblock = None  # Optional[Block]
     virtual_decls = []  # type: List[PybindMethodDecl]
@@ -557,11 +565,15 @@ def _postprocess_class(cls_name: str, cls_namespace: str, submod: str,
             cls_namespace.replace(".", "::"), virtual_cls_name))
     cls_def_argu_str = ", ".join(cls_def_arguments)
     cls_def_name = "{}_{}".format(submod, cls_name)
-    cls_def = "pybind11::class_<{cls_def_argu_str}> {def_name}({submod}, \"{cls_name}\");".format(
+    parent = ""
+    if parent_ns:
+        parent = ", {}".format(parent_ns)
+    cls_def = "pybind11::class_<{cls_def_argu_str}{parent}> {def_name}({submod}, \"{cls_name}\");".format(
         cls_def_argu_str=cls_def_argu_str,
         def_name=cls_def_name,
         submod=submod,
-        cls_name=cls_name)
+        cls_name=cls_name,
+        parent=parent)
     cls_def_stmts = [cls_def]  # type: List[Union[Block, str]]
     if not has_constructor:
         cls_def_stmts.append(
@@ -714,8 +726,8 @@ def _generate_python_interface_class(cls_name: str,
         default_str = ""
         if default is not None:
             default_str = " = {}".format(default)
-        decl_codes.append("{}: {}{}".format(prop_decl.get_prop_name(), prop_anno,
-                                            default_str))
+        decl_codes.append("{}: {}{}".format(prop_decl.get_prop_name(),
+                                            prop_anno, default_str))
     for decl in method_decls:
         if decl.bind_name not in name_to_overloaded:
             name_to_overloaded[decl.bind_name] = []
@@ -847,16 +859,18 @@ class Pybind11SingleClassHandler(ManualClass):
         self.prop_decls.append(
             PybindPropDecl(member_decl, cu.namespace, cu.class_name, mw_meta))
 
-    def postprocess(self):
+    def postprocess(self, parent_is_pybind: bool = False):
         if self.built:
             return
         bind_code = FunctionCode()
         bind_code.arg("module", "const pybind11::module_&")
         func_meta = StaticMemberFunctionMeta(impl_file_suffix=self.file_suffix)
+        parent_name = "" if not parent_is_pybind else self.cu.get_parent_name()
         cls_def_block, vblock = _postprocess_class(self.cu.class_name,
                                                    self.cu.namespace, "module",
                                                    self.get_pybind_decls(),
-                                                   self.cu._enum_classes)
+                                                   self.cu._enum_classes,
+                                                   parent_name)
         func_meta.name = self.bind_func_name
         if vblock is not None:
             bind_code.code_after_include = "\n".join(
@@ -1005,8 +1019,12 @@ class Pybind11SplitImpl(ManualClassGenerator):
         return bind_cu
 
     def get_code_units(self) -> List[Class]:
+        bind_cu_ids: Set[str] = set()
         for bind in self.bind_cus:
-            bind.postprocess()
+            bind_cu_ids.add(bind.cu.canonical_name)
+        for bind in self.bind_cus:
+            parent_name = bind.cu.get_parent_name()
+            bind.postprocess(parent_name in bind_cu_ids)
         self.main_cu.postprocess(self.bind_cus)
         res = []  # type: List[Class]
         res.extend(self.bind_cus)
