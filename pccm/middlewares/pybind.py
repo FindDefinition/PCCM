@@ -314,7 +314,9 @@ class Pybind11MethodMeta(Pybind11Meta):
                  ret_policy: ReturnPolicy = ReturnPolicy.Auto,
                  call_guard: Optional[str] = None,
                  virtual: bool = False,
-                 keep_alives: Optional[List[Tuple[int, int]]] = None):
+                 keep_alives: Optional[List[Tuple[int, int]]] = None,
+                 is_raw_bind: bool = False,
+                 raw_bind_anno: str = ""):
         super().__init__(Pybind11SplitImpl)
         self.bind_name = bind_name
         self.method_type = method_type
@@ -323,6 +325,8 @@ class Pybind11MethodMeta(Pybind11Meta):
         self.call_guard = call_guard
         self.virtual = virtual
         self.keep_alives = keep_alives
+        self.is_raw_bind = is_raw_bind
+        self.raw_bind_anno = raw_bind_anno
 
 
 class Pybind11PropMeta(Pybind11Meta):
@@ -333,12 +337,19 @@ class Pybind11PropMeta(Pybind11Meta):
         self.readwrite = readwrite
         self.name = name
 
+class Pybind11BindMethodMeta(Pybind11Meta):
+    """may add some attributes in future.
+    """
+    def __init__(self):
+        super().__init__(Pybind11SplitImpl)
 
 class PybindMethodDecl(object):
     def __init__(self, decl: FunctionDecl, namespace: str, class_name: str,
                  mw_meta: Pybind11MethodMeta):
         self.decl = decl
         self.mw_meta = mw_meta
+        if mw_meta.is_raw_bind:
+            assert isinstance(decl.meta, StaticMemberFunctionMeta), "bind method must be static"
         self.func_name = decl.get_function_name()
         self.bind_name = self.func_name
         if mw_meta.bind_name:
@@ -507,7 +518,8 @@ def _postprocess_class(cls_name: str,
     prop_decls = []  # type: List[PybindPropDecl]
     for decl in decls:
         if isinstance(decl, PybindMethodDecl):
-            method_decls.append(decl)
+            if not decl.mw_meta.is_raw_bind:
+                method_decls.append(decl)
         else:
             prop_decls.append(decl)
     for decl in method_decls:
@@ -706,7 +718,8 @@ def _generate_python_interface_class(cls_name: str,
     prop_decls = []  # type: List[PybindPropDecl]
     for decl in decls:
         if isinstance(decl, PybindMethodDecl):
-            method_decls.append(decl)
+            if not decl.mw_meta.is_raw_bind:
+                method_decls.append(decl)
         else:
             prop_decls.append(decl)
     name_to_overloaded = OrderedDict(
@@ -839,6 +852,7 @@ class Pybind11SingleClassHandler(ManualClass):
         self.cu = cu
 
         self.bind_func_name = "bind_{}".format(cu.class_name)
+        self.raw_bind_annos: List[str] = []
 
     def get_pybind_decls(
             self) -> List[Union[PybindMethodDecl, PybindPropDecl]]:
@@ -850,12 +864,15 @@ class Pybind11SingleClassHandler(ManualClass):
     def handle_function_decl(self, cu: Class, func_decl: FunctionDecl,
                              mw_meta: Pybind11MethodMeta):
         assert cu.namespace is not None
+        if mw_meta.raw_bind_anno:
+            self.raw_bind_annos.append(mw_meta.raw_bind_anno)
         self.func_decls.append(
             PybindMethodDecl(func_decl, cu.namespace, cu.class_name, mw_meta))
 
     def handle_member(self, cu: Class, member_decl: Member,
                       mw_meta: Pybind11PropMeta):
         assert cu.namespace is not None
+
         self.prop_decls.append(
             PybindPropDecl(member_decl, cu.namespace, cu.class_name, mw_meta))
 
@@ -876,6 +893,10 @@ class Pybind11SingleClassHandler(ManualClass):
             bind_code.code_after_include = "\n".join(
                 generate_code(vblock, 0, 2))
         bind_code.raw("\n".join(generate_code(cls_def_block, 0, 2)))
+        for decl in self.func_decls:
+            if decl.mw_meta.is_raw_bind:
+                bind_code.raw("{}::{}(module);".format(self.cu.canonical_name,
+                                                    decl.func_name))
         func_decl = FunctionDecl(func_meta, bind_code)
         self.add_func_decl(func_decl)
         # TODO better code
@@ -885,6 +906,8 @@ class Pybind11SingleClassHandler(ManualClass):
         else:
             self.add_impl_only_param_class_by_name(self.bind_func_name, "bind",
                                                    self.cu)
+
+
         self.built = True
 
 
@@ -928,11 +951,13 @@ class Pybind11SplitMain(ParameterizedClass):
             assert bind_cu.namespace is not None
             bind_ns = bind_cu.namespace
             submodule_name = submodules[bind_ns]
-            bind_func_name = "{}::{}::{}".format(bind_ns.replace(".", "::"),
+            bind_cpp_ns = bind_ns.replace(".", "::")
+            bind_func_name = "{}::{}::{}".format(bind_cpp_ns,
                                                  bind_cu.class_name,
                                                  bind_cu.bind_func_name)
             create_stmts.append("{}({});".format(bind_func_name,
                                                  submodule_name))
+
 
         code_block = Block("PYBIND11_MODULE({}, m){{".format(self.module_name),
                            sub_defs + create_stmts, "}")
@@ -954,10 +979,11 @@ class Pybind11SplitMain(ParameterizedClass):
         """
         init_import = "from typing import overload, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union"
         init_pccm_import = "from pccm.stubs import EnumValue, EnumClassValue"
-
         ns_to_interfaces = OrderedDict()  # type: Dict[str, List[Block]]
         ns_to_imports = OrderedDict()  # type: Dict[str, List[str]]
         ns_to_interface = OrderedDict()  # type: Dict[str, str]
+        ns_to_raw_bind_annos = OrderedDict()  # type: Dict[str, List[str]]
+
         exist_annos = {}  # type: Dict[str, str]
         for bind_cu in bind_cus:
             exist_annos.update(_collect_exist_annos(
@@ -969,11 +995,13 @@ class Pybind11SplitMain(ParameterizedClass):
             if ns not in ns_to_interfaces:
                 ns_to_interfaces[ns] = []
                 ns_to_imports[ns] = []
+                ns_to_raw_bind_annos[ns] = []
             class_block, cls_imports = _generate_python_interface_class(
                 origin_cu.class_name, bind_cu.get_pybind_decls(),
                 origin_cu._enum_classes, exist_annos)
             ns_to_imports[ns].extend(cls_imports)
             ns_to_interfaces[ns].append(class_block)
+            ns_to_raw_bind_annos[ns].extend(bind_cu.raw_bind_annos)
         module_as_init = set()  # type: Set[str]
         for k, interfaces in ns_to_interfaces.items():
             k_prefix = ".".join(k.split(".")[:-1])
@@ -993,6 +1021,8 @@ class Pybind11SplitMain(ParameterizedClass):
             imports = _unique_list_keep_order(imports)
             ns_to_interface[k_file] = "\n".join(
                 generate_code_list(imports + interfaces, 0, 4))
+            if k in ns_to_raw_bind_annos:
+                ns_to_interface[k_file] += "\n" + "\n".join(ns_to_raw_bind_annos[k])
         return ns_to_interface
 
 
@@ -1042,7 +1072,9 @@ def mark(func=None,
          ret_policy: ReturnPolicy = ReturnPolicy.Auto,
          virtual: bool = False,
          nogil: bool = False,
-         keep_alives: Optional[List[Tuple[int, int]]] = None):
+         keep_alives: Optional[List[Tuple[int, int]]] = None,
+         _is_raw_bind: bool = False,
+         _raw_bind_anno: str = ""):
     if virtual:
         assert not nogil, "you can't release gil for python virtual function."
     call_guard = None  # type: Optional[str]
@@ -1050,8 +1082,12 @@ def mark(func=None,
         call_guard = "pybind11::gil_scoped_release"
     pybind_meta = Pybind11MethodMeta(bind_name, method_type, prop_name,
                                      ret_policy, call_guard, virtual,
-                                     keep_alives)
+                                     keep_alives, _is_raw_bind, _raw_bind_anno)
     return middleware_decorator(func, pybind_meta)
+
+
+def mark_bind_raw(func=None, raw_bind_anno: str = ""):
+    return mark(func, _is_raw_bind=True, _raw_bind_anno=raw_bind_anno)
 
 
 def mark_prop_getter(func=None,
