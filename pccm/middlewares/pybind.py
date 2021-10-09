@@ -76,7 +76,7 @@ def _anno_parser(node: ast.AST, imports: List[str],
         assert isinstance(node.value, (ast.Name, ast.Attribute))
         if compat.Python3_9AndLater:
             # >= 3.9 ast.Index is deprecated
-            assert isinstance(node.slice, ast.Tuple)
+            # assert isinstance(node.slice, (ast.Tuple, ast.Name))
             return "{}[{}]".format(
                 _anno_parser(node.value, imports, disable_from_import),
                 _anno_parser(node.slice, imports, disable_from_import))
@@ -1116,7 +1116,7 @@ def mark_prop_setter(func=None,
 
 if __name__ == "__main__":
     # print(ast.parse)
-    print(python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]"))
+    print(python_anno_parser("Dict[int, List[int]]"))
     # python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]")
     print(
         _simple_template_type_parser("std::vector<std::tuple<int, ArrayPtr>>",
