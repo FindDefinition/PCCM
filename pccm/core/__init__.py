@@ -1606,9 +1606,9 @@ class CodeSectionImpl(CodeSection):
 def extract_module_id_of_class(
         cu_type: Type[Class],
         root: Optional[Union[str, Path]] = None) -> Optional[str]:
-    path = Path(inspect.getfile(cu_type))
+    path = Path(inspect.getfile(cu_type)).resolve()
     if root is not None:
-        relative_path = path.relative_to(Path(root))
+        relative_path = path.relative_to(Path(root).resolve())
         import_parts = list(relative_path.parts)
         import_parts[-1] = relative_path.stem
     else:
