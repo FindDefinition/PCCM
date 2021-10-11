@@ -1608,9 +1608,14 @@ def extract_module_id_of_class(
         root: Optional[Union[str, Path]] = None) -> Optional[str]:
     path = Path(inspect.getfile(cu_type)).resolve()
     if root is not None:
-        relative_path = path.relative_to(Path(root).resolve())
-        import_parts = list(relative_path.parts)
-        import_parts[-1] = relative_path.stem
+        try:
+            relative_path = path.relative_to(Path(root).resolve())
+            import_parts = list(relative_path.parts)
+            import_parts[-1] = relative_path.stem
+        except ValueError:
+            if loader.locate_top_package(path) is None:
+                return None
+            import_parts = loader.try_capture_import_parts(path, None)
     else:
         if loader.locate_top_package(path) is None:
             return None
