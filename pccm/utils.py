@@ -1,3 +1,18 @@
+import sys 
+import os 
+import importlib.util
+
+def project_is_editable(proj_name: str):
+    """Is distribution an editable install?"""
+    spec = importlib.util.find_spec(proj_name)
+    if spec is None or spec.origin is None:
+        raise ModuleNotFoundError(f"{proj_name} not found. you need to install it by pip.")
+    for path_item in sys.path:
+        egg_link = os.path.join(path_item, proj_name + '.egg-link')
+        if os.path.isfile(egg_link):
+            return True
+    return False
+
 def _make_unique_name(unique_set, name, max_count=10000):
     if name not in unique_set:
         unique_set.add(name)
