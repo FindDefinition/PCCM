@@ -36,6 +36,10 @@ _AUTO_ANNO_TYPES_DEFAULT_HANDLER = {
     "uint16_t": _IDENTITY_DEFAULT_HANDLER,
     "uint32_t": _IDENTITY_DEFAULT_HANDLER,
     "uint64_t": _IDENTITY_DEFAULT_HANDLER,
+    "std::intptr_t": _IDENTITY_DEFAULT_HANDLER,
+    "std::uintptr_t": _IDENTITY_DEFAULT_HANDLER,
+    "size_t": _IDENTITY_DEFAULT_HANDLER,
+    "std::size_t": _IDENTITY_DEFAULT_HANDLER,
     "unsigned": _IDENTITY_DEFAULT_HANDLER,
     "long": _IDENTITY_DEFAULT_HANDLER,
     "short": _IDENTITY_DEFAULT_HANDLER,
@@ -113,6 +117,14 @@ def _anno_parser(node: ast.AST, imports: List[str],
 class TemplateTypeStmt(object):
     NameToHandler = {
         "int":
+        lambda args: "int",
+        "std::uintptr_t":
+        lambda args: "int",
+        "std::intptr_t":
+        lambda args: "int",
+        "std::size_t":
+        lambda args: "int",
+        "size_t":
         lambda args: "int",
         "int8_t":
         lambda args: "int",
