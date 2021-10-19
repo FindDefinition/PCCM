@@ -1768,7 +1768,12 @@ class CodeGenerator(object):
                     assert cu._user_provided_class_name is not None, msg
                 cu_type_to_cu[cu_type] = cu
                 if cu.namespace is None:
-                    cu.namespace = extract_module_id_of_class(cu_type, root)
+                    extract_ns = extract_module_id_of_class(cu_type, root)
+                    if extract_ns is None:
+                        if root is not None:
+                            print(Path(root).resolve())
+                        raise ValueError(f"extract module id failed. {root}, {cu_type}, {cu}, {Path(inspect.getfile(cu_type)).resolve()}")
+                    cu.namespace = extract_ns
         # uid_to_cu order: leaf to root
         uid_to_cu = OrderedDict()  # type: Dict[str, Class]
         for cu in cus:
@@ -1778,7 +1783,7 @@ class CodeGenerator(object):
                 cur_cu_type = type(cur_cu)
                 cur_ns = cur_cu.namespace
                 # ns should be set below
-                assert cur_ns is not None
+                assert cur_ns is not None, f"cu namespace shouldn't be None. {root}, {cur_cu_type}, {cur_cu}"
                 uid_to_cu[cur_cu.uid] = cur_cu
                 all_cus.add(cur_cu_type)
                 # construct unified dependency and assign namespace for Class
@@ -1799,9 +1804,13 @@ class CodeGenerator(object):
                             raise ValueError("cycle detected")
                         if dep not in cu_type_to_cu:
                             cu_type_to_cu[dep] = dep()
-                            cu_type_to_cu[
-                                dep].namespace = extract_module_id_of_class(
-                                    dep, root=root)
+                            extract_ns = extract_module_id_of_class(
+                                   dep, root=root)
+                            if extract_ns is None:
+                                if root is not None:
+                                    print(Path(root).resolve())
+                                raise ValueError(f"extract module id failed. {root}, {dep}, {Path(inspect.getfile(dep)).resolve()}")
+                            cu_type_to_cu[dep].namespace = extract_ns
                         cur_cu._unified_deps.append(cu_type_to_cu[dep])
                         cur_type_trace_copy = cur_type_trace.copy()
                         cur_type_trace_copy.add(dep)
