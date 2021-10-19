@@ -13,6 +13,7 @@ from pccm.constants import (PCCM_CLASS_META_KEY, PCCM_FUNC_META_KEY,
                             PCCM_INIT_DECORATOR_KEY)
 from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
+from pccm.utils import get_qualname_of_type
 
 _HEADER_ONLY_PRE_ATTRS = set(["static", "virtual"])  # type: Set[str]
 _HEADER_ONLY_POST_ATTRS = set(["final", "override",
@@ -1614,11 +1615,13 @@ def extract_module_id_of_class(
             import_parts[-1] = relative_path.stem
         except ValueError:
             if loader.locate_top_package(path) is None:
-                return None
+                # use qual name
+                return get_qualname_of_type(cu_type)
             import_parts = loader.try_capture_import_parts(path, None)
     else:
         if loader.locate_top_package(path) is None:
-            return None
+            # use qual name
+            return get_qualname_of_type(cu_type)
         import_parts = loader.try_capture_import_parts(path, None)
     return ".".join(import_parts)
 
@@ -1772,7 +1775,9 @@ class CodeGenerator(object):
                     if extract_ns is None:
                         if root is not None:
                             print(Path(root).resolve())
-                        raise ValueError(f"extract module id failed. {root}, {cu_type}, {cu}, {Path(inspect.getfile(cu_type)).resolve()}")
+                        raise ValueError(
+                            f"extract module id failed. {root}, {cu_type}, {cu}, {Path(inspect.getfile(cu_type)).resolve()}"
+                        )
                     cu.namespace = extract_ns
         # uid_to_cu order: leaf to root
         uid_to_cu = OrderedDict()  # type: Dict[str, Class]
@@ -1804,12 +1809,14 @@ class CodeGenerator(object):
                             raise ValueError("cycle detected")
                         if dep not in cu_type_to_cu:
                             cu_type_to_cu[dep] = dep()
-                            extract_ns = extract_module_id_of_class(
-                                   dep, root=root)
+                            extract_ns = extract_module_id_of_class(dep,
+                                                                    root=root)
                             if extract_ns is None:
                                 if root is not None:
                                     print(Path(root).resolve())
-                                raise ValueError(f"extract module id failed. {root}, {dep}, {Path(inspect.getfile(dep)).resolve()}")
+                                raise ValueError(
+                                    f"extract module id failed. {root}, {dep}, {Path(inspect.getfile(dep)).resolve()}"
+                                )
                             cu_type_to_cu[dep].namespace = extract_ns
                         cur_cu._unified_deps.append(cu_type_to_cu[dep])
                         cur_type_trace_copy = cur_type_trace.copy()

@@ -30,6 +30,7 @@ def build_pybind(cus: List[Class],
                  suffix_to_compiler: Optional[Dict[str, List[str]]] = None,
                  disable_pch: bool = False,
                  disable_anno: bool = False,
+                 objects_folder: Optional[Union[str, Path]] = None,
                  verbose=False):
 
     mod_name = Path(out_path).stem
@@ -118,7 +119,8 @@ def build_pybind(cus: List[Class],
         pch_to_sources=pch_to_sources,
         pch_to_include=pch_to_include,
         suffix_to_compiler=suffix_to_compiler,
-        verbose=verbose)
+        verbose=verbose,
+        objects_folder=objects_folder)
 
 
 def build_library(cus: List[Class],
@@ -142,6 +144,7 @@ def build_library(cus: List[Class],
                   out_root: Optional[Union[str, Path]] = None,
                   suffix_to_compiler: Optional[Dict[str, List[str]]] = None,
                   disable_pch: bool = False,
+                  objects_folder: Optional[Union[str, Path]] = None,
                   verbose=False):
     subnamespace = Path(out_path).stem
 
@@ -215,4 +218,5 @@ def build_library(cus: List[Class],
         pch_to_sources=pch_to_sources,
         pch_to_include=pch_to_include,
         suffix_to_compiler=suffix_to_compiler,
-        verbose=verbose)
+        verbose=verbose,
+        objects_folder=objects_folder)

@@ -349,11 +349,13 @@ class Pybind11PropMeta(Pybind11Meta):
         self.readwrite = readwrite
         self.name = name
 
+
 class Pybind11BindMethodMeta(Pybind11Meta):
     """may add some attributes in future.
     """
     def __init__(self):
         super().__init__(Pybind11SplitImpl)
+
 
 class PybindMethodDecl(object):
     def __init__(self, decl: FunctionDecl, namespace: str, class_name: str,
@@ -361,7 +363,9 @@ class PybindMethodDecl(object):
         self.decl = decl
         self.mw_meta = mw_meta
         if mw_meta.is_raw_bind:
-            assert isinstance(decl.meta, StaticMemberFunctionMeta), "bind method must be static"
+            assert isinstance(
+                decl.meta,
+                StaticMemberFunctionMeta), "bind method must be static"
         self.func_name = decl.get_function_name()
         self.bind_name = self.func_name
         if mw_meta.bind_name:
@@ -908,7 +912,7 @@ class Pybind11SingleClassHandler(ManualClass):
         for decl in self.func_decls:
             if decl.mw_meta.is_raw_bind:
                 bind_code.raw("{}::{}(module);".format(self.cu.canonical_name,
-                                                    decl.func_name))
+                                                       decl.func_name))
         func_decl = FunctionDecl(func_meta, bind_code)
         self.add_func_decl(func_decl)
         # TODO better code
@@ -918,7 +922,6 @@ class Pybind11SingleClassHandler(ManualClass):
         else:
             self.add_impl_only_param_class_by_name(self.bind_func_name, "bind",
                                                    self.cu)
-
 
         self.built = True
 
@@ -969,7 +972,6 @@ class Pybind11SplitMain(ParameterizedClass):
                                                  bind_cu.bind_func_name)
             create_stmts.append("{}({});".format(bind_func_name,
                                                  submodule_name))
-
 
         code_block = Block("PYBIND11_MODULE({}, m){{".format(self.module_name),
                            sub_defs + create_stmts, "}")
@@ -1034,7 +1036,8 @@ class Pybind11SplitMain(ParameterizedClass):
             ns_to_interface[k_file] = "\n".join(
                 generate_code_list(imports + interfaces, 0, 4))
             if k in ns_to_raw_bind_annos:
-                ns_to_interface[k_file] += "\n" + "\n".join(ns_to_raw_bind_annos[k])
+                ns_to_interface[k_file] += "\n" + "\n".join(
+                    ns_to_raw_bind_annos[k])
         return ns_to_interface
 
 
