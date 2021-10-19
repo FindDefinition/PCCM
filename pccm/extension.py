@@ -23,6 +23,7 @@ class PCCMExtension(Extension):
                  cus: List[Class],
                  out_path: Union[str, Path],
                  namespace_root: Optional[Union[str, Path]] = None,
+                 objects_folder: Optional[Union[str, Path]] = None,
                  extcallback: Optional[ExtCallback] = None):
         # don't invoke the original build_ext for this special extension
         out_path_p = Path(out_path)
@@ -31,6 +32,7 @@ class PCCMExtension(Extension):
         self.out_path = out_path_p
         self.namespace_root = namespace_root
         self.extcallback = extcallback
+        self.objects_folder = objects_folder
 
 
 class PCCMBuild(build_ext):
@@ -60,7 +62,8 @@ class PCCMBuild(build_ext):
                                              build_out_path,
                                              namespace_root=ext.namespace_root,
                                              verbose=False,
-                                             load_library=False)
+                                             load_library=False,
+                                             objects_folder=ext.objects_folder)
         pyi_path = build_out_path
         lib_path = Path(lib_path)
         out_lib_path = out_path.parent / lib_path.name
