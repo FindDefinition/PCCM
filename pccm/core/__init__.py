@@ -1608,6 +1608,7 @@ def extract_module_id_of_class(
         cu_type: Type[Class],
         root: Optional[Union[str, Path]] = None) -> Optional[str]:
     path = Path(inspect.getfile(cu_type)).resolve()
+    qual_ns = cu_type.__module__
     if root is not None:
         try:
             relative_path = path.relative_to(Path(root).resolve())
@@ -1616,12 +1617,12 @@ def extract_module_id_of_class(
         except ValueError:
             if loader.locate_top_package(path) is None:
                 # use qual name
-                return get_qualname_of_type(cu_type)
+                return qual_ns
             import_parts = loader.try_capture_import_parts(path, None)
     else:
         if loader.locate_top_package(path) is None:
             # use qual name
-            return get_qualname_of_type(cu_type)
+            return qual_ns
         import_parts = loader.try_capture_import_parts(path, None)
     return ".".join(import_parts)
 
