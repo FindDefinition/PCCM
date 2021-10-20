@@ -77,11 +77,11 @@ def build_pybind(cus: List[Class],
         print("------------PCCM Headers-----------")
         for k,v in header_dict.items():
             print(k)
-            print(v)
+            print(v.to_string())
         print("------------PCCM Impls-----------")
         for k,v in impl_dict.items():
             print(k)
-            print(v)
+            print(v.to_string())
     cg.code_written(HEADER_ROOT, header_dict, code_fmt)
     paths = cg.code_written(SRC_ROOT, impl_dict, code_fmt)
     header_dict, impl_dict, header_to_impls = cg.code_generation(
@@ -90,11 +90,11 @@ def build_pybind(cus: List[Class],
         print("------------PCCM Pybind Headers-----------")
         for k,v in header_dict.items():
             print(k)
-            print(v)
+            print(v.to_string())
         print("------------PCCM Pybind Impls-----------")
         for k,v in impl_dict.items():
             print(k)
-            print(v)
+            print(v.to_string())
     cg.code_written(HEADER_ROOT, header_dict, code_fmt)
     paths += cg.code_written(SRC_ROOT, impl_dict, code_fmt)
     if not disable_anno:
