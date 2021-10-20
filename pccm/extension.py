@@ -7,10 +7,11 @@ from typing import Dict, List, Optional, Union
 from ccimport import compat
 from setuptools import Extension, find_packages, setup
 from setuptools.command.build_ext import build_ext
+from ccimport.buildtools.writer import DEFAULT_MSVC_DEP_PREFIX
 
 import pccm
 from pccm.core import Class
-
+from pccm.core import Class, CodeFormatter
 
 class ExtCallback(abc.ABC):
     @abc.abstractmethod
@@ -23,6 +24,11 @@ class PCCMExtension(Extension):
                  cus: List[Class],
                  out_path: Union[str, Path],
                  namespace_root: Optional[Union[str, Path]] = None,
+                 pybind_file_suffix: str = ".cc",
+                 msvc_deps_prefix=DEFAULT_MSVC_DEP_PREFIX,
+                 out_root: Optional[Union[str, Path]] = None,
+                 disable_pch: bool = False,
+                 disable_anno: bool = False,
                  objects_folder: Optional[Union[str, Path]] = None,
                  extcallback: Optional[ExtCallback] = None):
         # don't invoke the original build_ext for this special extension
@@ -33,6 +39,11 @@ class PCCMExtension(Extension):
         self.namespace_root = namespace_root
         self.extcallback = extcallback
         self.objects_folder = objects_folder
+        self.pybind_file_suffix = pybind_file_suffix
+        self.msvc_deps_prefix = msvc_deps_prefix
+        self.out_root = out_root
+        self.disable_pch = disable_pch
+        self.disable_anno = disable_anno
 
 
 class PCCMBuild(build_ext):
@@ -61,6 +72,11 @@ class PCCMBuild(build_ext):
         lib_path = pccm.builder.build_pybind(ext.cus,
                                              build_out_path,
                                              namespace_root=ext.namespace_root,
+                                             pybind_file_suffix=ext.pybind_file_suffix,
+                                             msvc_deps_prefix=ext.msvc_deps_prefix,
+                                             out_root=ext.out_root,
+                                             disable_pch=ext.disable_pch,
+                                             disable_anno=ext.disable_anno,
                                              verbose=False,
                                              load_library=False,
                                              objects_folder=ext.objects_folder)
