@@ -29,6 +29,7 @@ class PCCMExtension(Extension):
                  out_root: Optional[Union[str, Path]] = None,
                  disable_pch: bool = False,
                  disable_anno: bool = False,
+                 std: Optional[str] = "c++14",
                  objects_folder: Optional[Union[str, Path]] = None,
                  extcallback: Optional[ExtCallback] = None):
         # don't invoke the original build_ext for this special extension
@@ -44,6 +45,7 @@ class PCCMExtension(Extension):
         self.out_root = out_root
         self.disable_pch = disable_pch
         self.disable_anno = disable_anno
+        self._pccm_std = std
 
 
 class PCCMBuild(build_ext):
@@ -79,6 +81,7 @@ class PCCMBuild(build_ext):
                                              disable_anno=ext.disable_anno,
                                              verbose=False,
                                              load_library=False,
+                                             std=ext._pccm_std,
                                              objects_folder=ext.objects_folder)
         pyi_path = build_out_path
         lib_path = Path(lib_path)
