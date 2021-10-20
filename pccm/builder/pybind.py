@@ -31,6 +31,7 @@ def build_pybind(cus: List[Class],
                  disable_pch: bool = False,
                  disable_anno: bool = False,
                  objects_folder: Optional[Union[str, Path]] = None,
+                 debug_file_gen: bool = False,
                  verbose=False):
 
     mod_name = Path(out_path).stem
@@ -72,11 +73,28 @@ def build_pybind(cus: List[Class],
         extern_build_meta += cu.build_meta
     for cu in pb.get_code_units():
         extern_build_meta += cu.build_meta
-
+    if debug_file_gen:
+        print("------------PCCM Headers-----------")
+        for k,v in header_dict.items():
+            print(k)
+            print(v)
+        print("------------PCCM Impls-----------")
+        for k,v in impl_dict.items():
+            print(k)
+            print(v)
     cg.code_written(HEADER_ROOT, header_dict, code_fmt)
     paths = cg.code_written(SRC_ROOT, impl_dict, code_fmt)
     header_dict, impl_dict, header_to_impls = cg.code_generation(
         pb.get_code_units())
+    if debug_file_gen:
+        print("------------PCCM Pybind Headers-----------")
+        for k,v in header_dict.items():
+            print(k)
+            print(v)
+        print("------------PCCM Pybind Impls-----------")
+        for k,v in impl_dict.items():
+            print(k)
+            print(v)
     cg.code_written(HEADER_ROOT, header_dict, code_fmt)
     paths += cg.code_written(SRC_ROOT, impl_dict, code_fmt)
     if not disable_anno:
