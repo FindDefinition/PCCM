@@ -32,7 +32,8 @@ class PCCMExtension(Extension):
                  std: Optional[str] = "c++14",
                  objects_folder: Optional[Union[str, Path]] = None,
                  extcallback: Optional[ExtCallback] = None,
-                 debug_file_gen: bool = False):
+                 debug_file_gen: bool = False,
+                 verbose: bool = False):
         # don't invoke the original build_ext for this special extension
         out_path_p = Path(out_path)
         super().__init__(out_path_p.stem, sources=[])
@@ -48,6 +49,7 @@ class PCCMExtension(Extension):
         self.disable_anno = disable_anno
         self._pccm_std = std
         self.debug_file_gen = debug_file_gen
+        self._pccm_verbose = verbose
 
 
 class PCCMBuild(build_ext):
@@ -81,7 +83,7 @@ class PCCMBuild(build_ext):
                                              out_root=ext.out_root,
                                              disable_pch=ext.disable_pch,
                                              disable_anno=ext.disable_anno,
-                                             verbose=False,
+                                             verbose=ext._pccm_verbose,
                                              load_library=False,
                                              std=ext._pccm_std,
                                              objects_folder=ext.objects_folder,
