@@ -86,3 +86,22 @@ class BuildMeta(object):
         self.compiler_to_cflags.update(merged_cflags)
         self.compiler_to_ldflags.update(merged_ldflags)
         return self
+
+    def add_cflags(self, compiler: str, *cflags: str):
+        if compiler not in self.compiler_to_cflags:
+            self.compiler_to_cflags[compiler] = []
+        self.compiler_to_cflags[compiler].extend(cflags)
+
+    def add_ldflags(self, linker: str, *ldflags: str):
+        if linker not in self.compiler_to_cflags:
+            self.compiler_to_ldflags[linker] = []
+        self.compiler_to_ldflags[linker].extend(ldflags)
+
+    def add_includes(self, *incs: Union[str, Path]):
+        self.includes.extend(incs)
+
+    def add_libraries(self, *libs: str):
+        self.libraries.extend(libs)
+
+    def add_library_paths(self, *libpaths: Union[str, Path]):
+        self.libpaths.extend(libpaths)

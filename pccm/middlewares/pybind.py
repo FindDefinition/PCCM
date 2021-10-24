@@ -9,10 +9,10 @@ from pccm.core import (Class, CodeSectionClassDef, ConstructorMeta, EnumClass,
                        ExternalFunctionMeta, FunctionCode, FunctionDecl,
                        ManualClass, ManualClassGenerator, Member,
                        MemberFunctionMeta, MiddlewareMeta, ParameterizedClass,
-                       StaticMemberFunctionMeta)
+                       StaticMemberFunctionMeta, get_class_meta)
 from pccm.core.buildmeta import _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
-from pccm.core.markers import middleware_decorator
+from pccm.core.markers import middleware_decorator, append_class_mw_meta
 
 _IDENTITY_DEFAULT_HANDLER = lambda x: x
 
@@ -299,6 +299,9 @@ class Pybind11Meta(MiddlewareMeta):
     """
     pass
 
+class Pybind11ClassMeta:
+    def __init__(self, module_local: bool = False):
+        self.module_local = module_local
 
 class ReturnPolicy(Enum):
     TakeOwnerShip = "pybind11::return_value_policy::take_ownership"
@@ -526,7 +529,8 @@ def _postprocess_class(cls_name: str,
                        submod: str,
                        decls: List[Union[PybindMethodDecl, PybindPropDecl]],
                        enum_classes: List[EnumClass],
-                       parent_ns: str = ""):
+                       parent_ns: str = "",
+                       module_local: bool = False):
     has_virtual = False
     vblock = None  # Optional[Block]
     virtual_decls = []  # type: List[PybindMethodDecl]
@@ -596,7 +600,10 @@ def _postprocess_class(cls_name: str,
     parent = ""
     if parent_ns:
         parent = ", {}".format(parent_ns)
-    cls_def = "pybind11::class_<{cls_def_argu_str}{parent}> {def_name}({submod}, \"{cls_name}\");".format(
+    fmt = "pybind11::class_<{cls_def_argu_str}{parent}> {def_name}({submod}, \"{cls_name}\");"
+    if module_local:
+        fmt = "pybind11::class_<{cls_def_argu_str}{parent}> {def_name}({submod}, \"{cls_name}\", pybind11::module_local());"
+    cls_def = fmt.format(
         cls_def_argu_str=cls_def_argu_str,
         def_name=cls_def_name,
         submod=submod,
@@ -899,11 +906,19 @@ class Pybind11SingleClassHandler(ManualClass):
         bind_code.arg("module", "const pybind11::module_&")
         func_meta = StaticMemberFunctionMeta(impl_file_suffix=self.file_suffix)
         parent_name = "" if not parent_is_pybind else self.cu.get_parent_name()
+        cu_type = type( self.cu)
+        cls_meta=  get_class_meta(cu_type)
+        module_local = False 
+        if cls_meta is not None:
+            for mw_meta in cls_meta.mw_metas:
+                if isinstance(mw_meta, Pybind11ClassMeta):
+                    module_local = mw_meta.module_local
         cls_def_block, vblock = _postprocess_class(self.cu.class_name,
                                                    self.cu.namespace, "module",
                                                    self.get_pybind_decls(),
                                                    self.cu._enum_classes,
-                                                   parent_name)
+                                                   parent_name,
+                                                   module_local)
         func_meta.name = self.bind_func_name
         if vblock is not None:
             bind_code.code_after_include = "\n".join(
@@ -1128,6 +1143,9 @@ def mark_prop_setter(func=None,
                 ret_policy,
                 nogil=nogil)
 
+def bind_class_module_local(cls=None):
+    meta = Pybind11ClassMeta(True)
+    return append_class_mw_meta(cls, [meta])
 
 if __name__ == "__main__":
     # print(ast.parse)

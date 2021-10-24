@@ -1,11 +1,11 @@
-from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 from ccimport import compat
 
 from pccm.constants import PCCM_CLASS_META_KEY, PCCM_FUNC_META_KEY
 from pccm.core import (ClassMeta, ConstructorMeta, DestructorMeta,
                        ExternalFunctionMeta, FunctionMeta, MemberFunctionMeta,
-                       MiddlewareMeta, StaticMemberFunctionMeta)
+                       MiddlewareMeta, StaticMemberFunctionMeta, get_class_meta)
 
 PYTHON_OPERATORS_TO_CPP = {}
 
@@ -41,11 +41,11 @@ def class_meta_decorator(cls=None, meta: Optional[ClassMeta] = None):
     def wrapper(cls):
         if meta.name is None:
             meta.name = cls.__name__
-        if hasattr(cls, PCCM_CLASS_META_KEY):
-            assert getattr(
-                cls, PCCM_CLASS_META_KEY
-            ) is None, "you can only use one meta decorator in a class."
-        setattr(cls, PCCM_CLASS_META_KEY, meta)
+        cls_meta = get_class_meta(cls)
+        if cls_meta is not None:
+            cls_meta.skip_inherit = meta.skip_inherit
+        else:
+            setattr(cls, PCCM_CLASS_META_KEY, meta)
         return cls
 
     if cls is not None:
@@ -53,6 +53,26 @@ def class_meta_decorator(cls=None, meta: Optional[ClassMeta] = None):
     else:
         return wrapper
 
+def append_class_mw_meta(cls=None, mw_metas: Optional[List[Any]] = None):
+    if not compat.Python3_6AndLater:
+        raise NotImplementedError(
+            "only python 3.6+ support class meta decorator.")
+    if mw_metas is None:
+        raise ValueError("this shouldn't happen")
+
+    def wrapper(cls):
+        cls_meta = get_class_meta(cls)
+        if cls_meta is None:
+            cls_meta = ClassMeta(cls.__name__, mw_metas=mw_metas)
+            setattr(cls, PCCM_CLASS_META_KEY, cls_meta)
+        else:
+            cls_meta.mw_metas.extend(mw_metas)
+        return cls
+
+    if cls is not None:
+        return wrapper(cls)
+    else:
+        return wrapper
 
 def middleware_decorator(func=None, meta: Optional[MiddlewareMeta] = None):
     if meta is None:

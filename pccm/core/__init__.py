@@ -3,9 +3,9 @@ import contextlib
 import difflib
 import inspect
 import types
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict, defaultdict, deque
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union
 
 from ccimport import compat, loader
 
@@ -74,9 +74,12 @@ class FunctionMeta(object):
 
 
 class ClassMeta(object):
-    def __init__(self, name: Optional[str] = None, skip_inherit: bool = False):
+    def __init__(self, name: Optional[str] = None, skip_inherit: bool = False, mw_metas: Optional[List[Any]] = None ):
         self.skip_inherit = skip_inherit
         self.name = name
+        if mw_metas is None:
+            mw_metas = []
+        self.mw_metas = mw_metas
 
 
 def get_func_meta_except(func) -> FunctionMeta:
@@ -1783,9 +1786,10 @@ class CodeGenerator(object):
         # uid_to_cu order: leaf to root
         uid_to_cu = OrderedDict()  # type: Dict[str, Class]
         for cu in cus:
-            stack = [(cu, set())]  # type: List[Tuple[Class, Set[Type[Class]]]]
+            stack: Deque[Tuple[Class, Set[Type[Class]]]] = deque([(cu, set())])
+            # perform BFS here because we need to handle leaf nodes first in following process.
             while stack:
-                cur_cu, cur_type_trace = stack.pop()
+                cur_cu, cur_type_trace = stack.popleft()
                 cur_cu_type = type(cur_cu)
                 cur_ns = cur_cu.namespace
                 # ns should be set below
