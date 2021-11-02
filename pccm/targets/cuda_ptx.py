@@ -432,7 +432,12 @@ class PTXContext:
 
     def _ld_or_st(self, is_ld: bool, addr: Pointer,
                   regs: Union[List[REG_OPERAND_TYPES], REG_OPERAND_TYPES],
-                  cache_op: Optional[Union[CacheOpLd, CacheOpSt]]):
+                  cache_op: Optional[Union[CacheOpLd, CacheOpSt]],
+                level: str = "",
+                prefetch_size: int = -1):
+        if level:
+            assert level == "L2"
+            assert prefetch_size in [64, 128, 256]
         if not addr.is_input:
             addr.is_input = is_ld
         if is_ld:
@@ -453,7 +458,8 @@ class PTXContext:
             stmt = "{}.global".format(ld_or_st)
         else:
             stmt = "{}.shared".format(ld_or_st)
-
+        if level:
+            stmt += f".{level}::{prefetch_size}B"
         if len(regs) > 1:
             stmt += ".v{}".format(len(regs))
         if cache_op is not None:
@@ -485,8 +491,10 @@ class PTXContext:
     def ld(self,
            addr: Pointer,
            regs: Union[List[REG_OPERAND_TYPES], REG_OPERAND_TYPES],
-           cache_op: Optional[CacheOpLd] = None):
-        return self._ld_or_st(True, addr, regs, cache_op)
+           cache_op: Optional[CacheOpLd] = None,
+           level: str = "",
+           prefetch_size: int = -1):
+        return self._ld_or_st(True, addr, regs, cache_op, level, prefetch_size)
 
     def st(self,
            addr: Pointer,
