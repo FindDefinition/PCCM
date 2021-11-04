@@ -1797,77 +1797,98 @@ class CodeGenerator(object):
                     cu.namespace = extract_ns
         # uid_to_cu order: leaf to root
         uid_to_cu = OrderedDict()  # type: Dict[str, Class]
+        stack: Deque[Tuple[Class, Set[Type[Class]]]] = deque([])
         for cu in cus:
-            stack: Deque[Tuple[Class, Set[Type[Class]]]] = deque([(cu, set())])
-            # perform BFS here because we need to handle leaf nodes first in following process.
-            while stack:
-                cur_cu, cur_type_trace = stack.popleft()
-                cur_cu_type = type(cur_cu)
-                cur_ns = cur_cu.namespace
-                # ns should be set below
-                assert cur_ns is not None, f"cu namespace shouldn't be None. {root}, {cur_cu_type}, {cur_cu}"
-                uid_to_cu[cur_cu.uid] = cur_cu
-                all_cus.add(cur_cu_type)
-                # construct unified dependency and assign namespace for Class
-                if not cur_cu.graph_inited:
-                    # extract deps in code object
-                    for decl in self.cached_extract_classunit_methods(cur_cu):
-                        code_obj = decl.code
-                        # decl.meta.name
-                        for dep in code_obj._impl_only_deps:
-                            cur_cu.add_impl_only_dependency_by_name(
-                                decl.meta.name, dep)
-                        for (subns, pcls, alias) in code_obj._impl_only_pdeps:
-                            cur_cu.add_impl_only_param_class_by_name(
-                                decl.meta.name, subns, pcls, alias)
+            stack.append((cu, set()))
+        while stack:
+            cur_cu, cur_type_trace = stack.popleft()
+            cur_cu_type = type(cur_cu)
+            cur_ns = cur_cu.namespace
+            # ns should be set below
+            assert cur_ns is not None, f"cu namespace shouldn't be None. {root}, {cur_cu_type}, {cur_cu}"
+            uid_to_cu[cur_cu.uid] = cur_cu
+            all_cus.add(cur_cu_type)
+            # construct unified dependency and assign namespace for Class
+            if not cur_cu.graph_inited:
+                # extract deps in code object
+                for decl in self.cached_extract_classunit_methods(cur_cu):
+                    code_obj = decl.code
+                    # decl.meta.name
+                    for dep in code_obj._impl_only_deps:
+                        cur_cu.add_impl_only_dependency_by_name(
+                            decl.meta.name, dep)
+                    for (subns, pcls, alias) in code_obj._impl_only_pdeps:
+                        cur_cu.add_impl_only_param_class_by_name(
+                            decl.meta.name, subns, pcls, alias)
 
-                    for dep in cur_cu.get_class_deps():
-                        if dep in cur_type_trace:
-                            raise ValueError("cycle detected")
-                        if dep not in cu_type_to_cu:
-                            cu_type_to_cu[dep] = dep()
-                            extract_ns = extract_module_id_of_class(dep,
-                                                                    root=root)
-                            if extract_ns is None:
-                                if root is not None:
-                                    print(Path(root).resolve())
-                                raise ValueError(
-                                    f"extract module id failed. {root}, {dep}, {Path(inspect.getfile(dep)).resolve()}"
-                                )
-                            cu_type_to_cu[dep].namespace = extract_ns
-                        cur_cu._unified_deps.append(cu_type_to_cu[dep])
-                        cur_type_trace_copy = cur_type_trace.copy()
-                        cur_type_trace_copy.add(dep)
-                        stack.append((cu_type_to_cu[dep], cur_type_trace_copy))
+                for dep in cur_cu.get_class_deps():
+                    if dep in cur_type_trace:
+                        raise ValueError("cycle detected")
+                    if dep not in cu_type_to_cu:
+                        cu_type_to_cu[dep] = dep()
+                        extract_ns = extract_module_id_of_class(dep,
+                                                                root=root)
+                        if extract_ns is None:
+                            if root is not None:
+                                print(Path(root).resolve())
+                            raise ValueError(
+                                f"extract module id failed. {root}, {dep}, {Path(inspect.getfile(dep)).resolve()}"
+                            )
+                        cu_type_to_cu[dep].namespace = extract_ns
+                    cur_cu._unified_deps.append(cu_type_to_cu[dep])
+                    cur_type_trace_copy = cur_type_trace.copy()
+                    cur_type_trace_copy.add(dep)
+                    stack.append((cu_type_to_cu[dep], cur_type_trace_copy))
 
-                    for k, pcls_with_alias_tuples in cur_cu._param_class.items(
-                    ):
-                        for pcls, _ in pcls_with_alias_tuples:
-                            if type(pcls) in cur_type_trace:
-                                raise ValueError("cycle detected")
-                            if pcls.namespace is None:
-                                pcls.namespace = cur_ns + "." + k
-                            cur_cu._unified_deps.append(pcls)
-                            cur_type_trace_copy = cur_type_trace.copy()
-                            cur_type_trace_copy.add(type(pcls))
-                            stack.append((pcls, cur_type_trace_copy))
-                    cur_cu._function_decls.extend(
-                        self.cached_extract_classunit_methods(cur_cu))
-                    cur_cu._assign_overload_flag_to_func_decls()
-                    cur_cu.graph_inited = True
-                else:
-                    for dep in cur_cu._unified_deps:
-                        if type(dep) in cur_type_trace:
+                for k, pcls_with_alias_tuples in cur_cu._param_class.items(
+                ):
+                    for pcls, _ in pcls_with_alias_tuples:
+                        if type(pcls) in cur_type_trace:
                             raise ValueError("cycle detected")
+                        if pcls.namespace is None:
+                            pcls.namespace = cur_ns + "." + k
+                        cur_cu._unified_deps.append(pcls)
                         cur_type_trace_copy = cur_type_trace.copy()
-                        cur_type_trace_copy.add(type(dep))
-                        stack.append((dep, cur_type_trace_copy))
+                        cur_type_trace_copy.add(type(pcls))
+                        stack.append((pcls, cur_type_trace_copy))
+                cur_cu._function_decls.extend(
+                    self.cached_extract_classunit_methods(cur_cu))
+                cur_cu._assign_overload_flag_to_func_decls()
+                cur_cu.graph_inited = True
+            else:
+                for dep in cur_cu._unified_deps:
+                    if type(dep) in cur_type_trace:
+                        raise ValueError("cycle detected")
+                    cur_type_trace_copy = cur_type_trace.copy()
+                    cur_type_trace_copy.add(type(dep))
+                    stack.append((dep, cur_type_trace_copy))
         # make uid_to_cu reversed, i.e. from leaf-root to root-leaf
-        uid_to_cu = OrderedDict(reversed(uid_to_cu.items()))
+        # perform post-order here because we need to handle leaf nodes first in following process.
+        uid_to_cu = self._postorder_sort(cus)
+        # uid_to_cu = OrderedDict(reversed(uid_to_cu.items()))
+
         if run_middleware:
             self._apply_middleware_to_cus(uid_to_cu)
         return list(uid_to_cu.values())
         # self.built = True
+
+    def _postorder_sort_recursive(self, cu: Class, items: List[Tuple[str, Class]], visited: Set[str]):
+        # TODO iter-based 
+        uid = cu.uid
+        assert uid is not None 
+        if cu.uid in visited:
+            return
+        visited.add(uid)
+        for dep in cu._unified_deps:
+            self._postorder_sort_recursive(dep, items, visited)
+        items.append((uid, cu))
+
+    def _postorder_sort(self, root_cus: List[Class]):
+        items: List[Tuple[str, Class]] = []
+        visited: Set[str] = set()
+        for v in root_cus:
+            self._postorder_sort_recursive(v, items, visited)
+        return OrderedDict(items)
 
     def cached_get_cu_members(self, cu: Class):
         cu_type = type(cu)
