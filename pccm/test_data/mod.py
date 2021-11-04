@@ -77,6 +77,14 @@ class Test4(Test3):
         """).arg("a,b", "int").ret("int")
         return code
 
+    @pccm.pybind.mark
+    @pccm.static_function
+    def invalid_method(self):
+        code = pccm.FunctionCode("")
+        code.raw("""
+        return a + b;
+        """).arg("a,b", "int").ret("int")
+        return code.make_invalid()
 
 class PbTestVirtual(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):

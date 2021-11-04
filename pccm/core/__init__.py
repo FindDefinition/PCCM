@@ -449,9 +449,21 @@ class FunctionCode(object):
         self._impl_only_deps: List[Type[Class]] = []
         self._impl_only_pdeps: List[Tuple[str, "ParameterizedClass",
                                           Optional[str]]] = []
+        self._invalid = False
 
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0
+
+    def make_invalid(self):
+        self._invalid = True 
+        return self
+
+    def make_valid(self):
+        self._invalid = False 
+        return self
+
+    def is_invalid(self) -> bool:
+        return self._invalid
 
     def raw(self, code: str):
         # align code indent to zero if possible
@@ -1882,6 +1894,8 @@ class CodeGenerator(object):
                     msg = "your func {}-{}-{} must return a FunctionCode".format(
                         cu.namespace, cu.class_name, v.__name__)
                     raise ValueError(msg)
+                if code_obj.is_invalid():
+                    continue
                 func_doc = inspect.getdoc(v)
                 code_obj.func_doc = func_doc
                 methods.append(FunctionDecl(meta, code_obj))
