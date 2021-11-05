@@ -724,7 +724,8 @@ def _generate_python_interface_class(cls_name: str,
                                      decls: List[Union[PybindMethodDecl,
                                                        PybindPropDecl]],
                                      enum_classes: List[EnumClass],
-                                     exist_annos: Dict[str, str]):
+                                     exist_annos: Dict[str, str],
+                                     parent_name: str = ""):
     """
     dep_imports
     class xxx:
@@ -854,8 +855,12 @@ def _generate_python_interface_class(cls_name: str,
         decl_codes.append(Block(prefix, def_items))
         if not ec.scoped:
             decl_codes.extend(ec_items)
-
-    class_block = Block("class {}:".format(cls_name), decl_codes)
+    class_def_string = "class {}:".format(cls_name)
+    if parent_name:
+        class_def_string = "class {}({}):".format(cls_name, parent_name)
+        parent_name_ns = ".".join(parent_name.split(".")[:-1])
+        imports.append("import {}".format(parent_name_ns))
+    class_block = Block(class_def_string, decl_codes)
     return class_block, imports
 
 
@@ -1014,9 +1019,11 @@ class Pybind11SplitMain(ParameterizedClass):
         ns_to_raw_bind_annos = OrderedDict()  # type: Dict[str, List[str]]
 
         exist_annos = {}  # type: Dict[str, str]
+        bind_cu_ids: Set[str] = set()
         for bind_cu in bind_cus:
             exist_annos.update(_collect_exist_annos(
                 bind_cu.get_pybind_decls()))
+            bind_cu_ids.add(bind_cu.cu.canonical_name)
         for bind_cu in bind_cus:
             origin_cu = bind_cu.cu
             ns = origin_cu.namespace
@@ -1025,9 +1032,13 @@ class Pybind11SplitMain(ParameterizedClass):
                 ns_to_interfaces[ns] = []
                 ns_to_imports[ns] = []
                 ns_to_raw_bind_annos[ns] = []
+            parent_name = bind_cu.cu.get_parent_name()
+            if parent_name not in bind_cu_ids:
+                parent_name = ""
+            parent_name = ".".join(parent_name.split("::"))
             class_block, cls_imports = _generate_python_interface_class(
                 origin_cu.class_name, bind_cu.get_pybind_decls(),
-                origin_cu._enum_classes, exist_annos)
+                origin_cu._enum_classes, exist_annos, parent_name)
             ns_to_imports[ns].extend(cls_imports)
             ns_to_interfaces[ns].append(class_block)
             ns_to_raw_bind_annos[ns].extend(bind_cu.raw_bind_annos)
