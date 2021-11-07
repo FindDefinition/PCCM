@@ -95,6 +95,10 @@ def _anno_parser(node: ast.AST, imports: List[str],
     elif isinstance(node, ast.Tuple):
         return ", ".join(
             _anno_parser(e, imports, disable_from_import) for e in node.elts)
+    elif isinstance(node, ast.List):
+        return ", ".join(
+            _anno_parser(e, imports, disable_from_import) for e in node.elts)
+
     elif isinstance(node, ast.Name):
         return node.id
     elif isinstance(node, ast.Attribute):
@@ -725,7 +729,8 @@ def _generate_python_interface_class(cls_name: str,
                                                        PybindPropDecl]],
                                      enum_classes: List[EnumClass],
                                      exist_annos: Dict[str, str],
-                                     parent_name: str = ""):
+                                     parent_import_ns: str = "",
+                                     parent_class_name: str = ""):
     """
     dep_imports
     class xxx:
@@ -856,10 +861,9 @@ def _generate_python_interface_class(cls_name: str,
         if not ec.scoped:
             decl_codes.extend(ec_items)
     class_def_string = "class {}:".format(cls_name)
-    if parent_name:
-        class_def_string = "class {}({}):".format(cls_name, parent_name)
-        parent_name_ns = ".".join(parent_name.split(".")[:-1])
-        imports.append("import {}".format(parent_name_ns))
+    if parent_class_name:
+        class_def_string = "class {}({}):".format(cls_name, parent_class_name)
+        imports.append("from {} import {}".format(parent_import_ns, parent_class_name))
     class_block = Block(class_def_string, decl_codes)
     return class_block, imports
 
@@ -872,6 +876,7 @@ class Pybind11SingleClassHandler(ManualClass):
         self.add_include("pybind11/stl.h")
         self.add_include("pybind11/pybind11.h")
         self.add_include("pybind11/numpy.h")
+        self.add_include("pybind11/functional.h")
         self.file_suffix = file_suffix
         self.built = False
 
@@ -1033,12 +1038,18 @@ class Pybind11SplitMain(ParameterizedClass):
                 ns_to_imports[ns] = []
                 ns_to_raw_bind_annos[ns] = []
             parent_name = bind_cu.cu.get_parent_name()
-            if parent_name not in bind_cu_ids:
-                parent_name = ""
-            parent_name = ".".join(parent_name.split("::"))
+            num_level = len(ns.split("."))
+            parent_import_ns = ""
+            parent_class_name = ""
+            if parent_name in bind_cu_ids:
+                parent_name = ".".join(parent_name.split("::"))
+                parent_name_splits = parent_name.split(".")
+                parent_ns = ".".join(parent_name_splits[:-1])
+                parent_import_ns = "." * num_level + parent_ns
+                parent_class_name = parent_name_splits[-1]
             class_block, cls_imports = _generate_python_interface_class(
                 origin_cu.class_name, bind_cu.get_pybind_decls(),
-                origin_cu._enum_classes, exist_annos, parent_name)
+                origin_cu._enum_classes, exist_annos, parent_import_ns, parent_class_name)
             ns_to_imports[ns].extend(cls_imports)
             ns_to_interfaces[ns].append(class_block)
             ns_to_raw_bind_annos[ns].extend(bind_cu.raw_bind_annos)
