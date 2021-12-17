@@ -422,6 +422,12 @@ class PybindMethodDecl(object):
         addr = addr_fmt.format(arg_types, self.addr)
         return addr
 
+    def get_python_name(self):
+        if isinstance(self.decl.meta, ConstructorMeta):
+            return "__init__"
+        else:
+            return self.bind_name
+
     def to_string(self) -> str:
         if isinstance(self.decl.meta, ConstructorMeta):
             if self.args:
@@ -771,9 +777,10 @@ def _generate_python_interface_class(cls_name: str,
         decl_codes.append("{}: {}{}".format(prop_decl.get_prop_name(),
                                             prop_anno, default_str))
     for decl in method_decls:
-        if decl.bind_name not in name_to_overloaded:
-            name_to_overloaded[decl.bind_name] = []
-        name_to_overloaded[decl.bind_name].append(decl)
+        decl_python_name = decl.get_python_name()
+        if decl_python_name not in name_to_overloaded:
+            name_to_overloaded[decl_python_name] = []
+        name_to_overloaded[decl_python_name].append(decl)
     for bind_name, over_decls in name_to_overloaded.items():
         if len(over_decls) == 1:
             fmt = "{}def {}({}){}: {}..."
@@ -798,8 +805,8 @@ def _generate_python_interface_class(cls_name: str,
                 res_anno = " -> {}".format(anno)
                 imports.extend(from_imports)
             decl_bind_name = bind_name
-            if isinstance(pydecl.decl.meta, ConstructorMeta):
-                decl_bind_name = "__init__"
+            # if isinstance(pydecl.decl.meta, ConstructorMeta):
+            #     decl_bind_name = "__init__"
 
             arg_names = []  # type: List[str]
             have_default = False  # type: bool

@@ -13,7 +13,12 @@ from pccm.constants import (PCCM_CLASS_META_KEY, PCCM_FUNC_META_KEY,
                             PCCM_INIT_DECORATOR_KEY)
 from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
+from pccm.core.parsers import arg_parser
 from pccm.utils import get_qualname_of_type
+
+from pccm.core.funccode import Argument, TemplateTypeArgument, TemplateNonTypeArgument
+import functools 
+
 
 _HEADER_ONLY_PRE_ATTRS = set(["static", "virtual"])  # type: Set[str]
 _HEADER_ONLY_POST_ATTRS = set(["final", "override",
@@ -24,6 +29,22 @@ class MiddlewareMeta(object):
     def __init__(self, mw_type: Type["_MW_TYPES"]):
         self.type = mw_type
 
+_FCODE_ARGUMENT_ATTR_HOOKS: Dict[str, Callable[["FunctionCode", List[Argument]], None]] = {}
+
+def register_arg_attr_hook(f=None, type_str: str=""):
+    def wrapper(func):
+        if type_str in _FCODE_ARGUMENT_ATTR_HOOKS:
+            raise KeyError(f"{type_str} exists.")
+        _FCODE_ARGUMENT_ATTR_HOOKS[type_str] = func
+        return func
+    if f is not None:
+        return wrapper(f)
+    else:
+        return wrapper
+
+def _get_attr_hook(type_str: str):
+    res = _FCODE_ARGUMENT_ATTR_HOOKS.get(type_str, None)
+    return res
 
 class FunctionMeta(object):
     def __init__(self,
@@ -261,26 +282,6 @@ class ExternalFunctionMeta(FunctionMeta):
                          impl_file_suffix=impl_file_suffix,
                          header_only=header_only)
 
-
-class Argument(object):
-    def __init__(self,
-                 name: str,
-                 type: str,
-                 default: Optional[str] = None,
-                 array: Optional[str] = None,
-                 pyanno: Optional[str] = None,
-                 doc: Optional[str] = None):
-        self.name = name.strip()
-        self.type_str = str(type).strip()  # type: str
-        self.default = default
-        self.array = array
-        self.pyanno = pyanno
-        self.doc = doc
-        if pyanno is not None:
-            self.pyanno = pyanno.strip()
-            assert len(pyanno) != 0
-
-
 class Typedef(object):
     def __init__(self, name: str, content: str):
         self.name = name
@@ -371,55 +372,6 @@ class Member(Argument):
             else:
                 return "{}{} {}{} = {};".format(doc, self.type_str, self.name,
                                                 self.array, self.default)
-
-
-class TemplateTypeArgument(object):
-    def __init__(self,
-                 name: str,
-                 default: Optional[str] = None,
-                 template: str = "",
-                 packed: bool = False):
-        self.name = name
-        self.template = template
-        self.packed = packed
-        self.default = default
-
-    def to_string(self) -> str:
-        pack = ""
-        if self.packed:
-            if self.default:
-                raise ValueError("packed arg can't have default value")
-            pack = "..."
-        if self.template:
-            res = "{} typename{} {}".format(self.template, pack, self.name)
-        else:
-            res = "typename{} {}".format(pack, self.name)
-        if self.default:
-            res += " = {}".format(self.default)
-        return res
-
-
-class TemplateNonTypeArgument(object):
-    def __init__(self,
-                 name: str,
-                 type: str,
-                 default: Optional[str] = None,
-                 packed: bool = False):
-        self.name = name
-        self.type = type
-        self.packed = packed
-        self.default = default
-
-    def to_string(self) -> str:
-        pack = ""
-        if self.packed:
-            if self.default:
-                raise ValueError("packed arg can't have default value")
-            pack = "..."
-        res = "{}{} {}".format(self.type, pack, self.name)
-        if self.default:
-            res += " = {}".format(self.default)
-        return res
 
 
 class FunctionCode(object):
@@ -699,6 +651,16 @@ class FunctionCode(object):
             block = Block("#if {}".format(meta.macro_guard), [block], "#endif")
         return block
 
+    def inspect_body(self):
+        """
+        template <args>
+        pre_attrs ret_type BoundClass::name(args) post_attrs {body};
+        """
+        blocks = []  # List[Union[Block, str]]
+        blocks.extend(self._blocks)
+        block = Block("{", blocks, "}")
+        return "\n".join(generate_code(block, 0, 2))
+
     def arg(self,
             name: str,
             type: str,
@@ -706,12 +668,26 @@ class FunctionCode(object):
             pyanno: Optional[str] = None):
         """add a argument.
         """
-        name_part = name.split(",")
-        for part in name_part:
-            if not part.strip():
-                raise ValueError("you provide a empty name in", name)
-            self.arguments.append(
-                Argument(part.strip(), type, default, pyanno=pyanno))
+        type = type.strip()
+        args: List[Argument] = []
+        if "[" not in name:
+            name_part = name.split(",")
+            for part in name_part:
+                if not part.strip():
+                    raise ValueError("you provide a empty name in", name)
+                args.append(
+                    Argument(part.strip(), type, default, pyanno=pyanno))
+        else:
+            arg_attrs = arg_parser(name)
+            for arg_with_attr in arg_attrs:
+                if not arg_with_attr.name:
+                    raise ValueError("you provide a empty name in", name)
+                args.append(
+                    Argument(arg_with_attr.name, type, default, pyanno=pyanno, attrs=arg_with_attr.attrs))
+        hook = _get_attr_hook(type)
+        if hook is not None:
+            hook(self, args)
+        self.arguments.extend(args)
         return self
 
     def targ(self,
@@ -1964,6 +1940,7 @@ class CodeGenerator(object):
                     code_old_lines = code.strip().split("\n")
                     diff = difflib.unified_diff(code_old_lines,
                                                 code_to_write_lines)
+                    print(f"---{code_path}---")
                     print("\n".join(diff))
             code_path.parent.mkdir(exist_ok=True, parents=True)
             with code_path.open("w") as f:

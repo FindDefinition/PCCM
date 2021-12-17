@@ -93,7 +93,7 @@ class BuildMeta(object):
         self.compiler_to_cflags[compiler].extend(cflags)
 
     def add_ldflags(self, linker: str, *ldflags: str):
-        if linker not in self.compiler_to_cflags:
+        if linker not in self.compiler_to_ldflags:
             self.compiler_to_ldflags[linker] = []
         self.compiler_to_ldflags[linker].extend(ldflags)
 
