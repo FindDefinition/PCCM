@@ -3,7 +3,7 @@ from pccm.core import FunctionCode, register_arg_attr_hook
 from pccm.core.funccode import Argument
 
 
-@register_arg_attr_hook(type_str="tv::Tensor")
+@register_arg_attr_hook("tv::Tensor")
 def handle_tv_tensor(code: FunctionCode, args: List[Argument]):
     """tv::Tensor attrs:
     dtype, ndim, shape
@@ -19,9 +19,10 @@ def handle_tv_tensor(code: FunctionCode, args: List[Argument]):
         if len(attrs) >= 2:
             assert not isinstance(attrs[1].value, list)
             ndim = int(attrs[1].value)
-        code.raw(f"""
-        {dtype}* {arg.name}_ptr = {arg.name}.data_ptr<{dtype}>();
-        """)
+        if dtype != "void":
+            code.raw(f"""
+            {dtype}* {arg.name}_ptr = {arg.name}.data_ptr<{dtype}>();
+            """)
         if ndim is not None:
             code.raw(f"""
             TV_ASSERT_INVALID_ARG({arg.name}.ndim() == {ndim}, 
@@ -42,7 +43,7 @@ def handle_tv_tensor(code: FunctionCode, args: List[Argument]):
                     if s in shape_keys:
                         code.raw(f"""
                         TV_ASSERT_INVALID_ARG({s} == {arg.name}.dim({i}), 
-                            "{arg.name}.shape[{i}] mismatch. expected:", {s}, ", get: {arg.name}.dim(i)");
+                            "{arg.name}.shape[{i}] mismatch. expected:", {s}, ", get:", {arg.name}.dim({i}));
                         """)
                     else:
                         shape_keys.add(s)
@@ -52,8 +53,8 @@ def handle_tv_tensor(code: FunctionCode, args: List[Argument]):
                 shape_str = ", ".join(map(str, shape))
                 code.raw(f"""
                 TV_ASSERT_INVALID_ARG({check_stmt}, 
-                    "shape mismatch. expected: [{shape_str}], get: {arg.name}.shape()");
-                """)            
+                    "shape mismatch. expected: [{shape_str}], get:", {arg.name}.shape());
+                """)
 
 if __name__ == "__main__":
     code = FunctionCode()

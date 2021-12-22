@@ -31,16 +31,13 @@ class MiddlewareMeta(object):
 
 _FCODE_ARGUMENT_ATTR_HOOKS: Dict[str, Callable[["FunctionCode", List[Argument]], None]] = {}
 
-def register_arg_attr_hook(f=None, type_str: str=""):
+def register_arg_attr_hook(type_str: str):
     def wrapper(func):
         if type_str in _FCODE_ARGUMENT_ATTR_HOOKS:
             raise KeyError(f"{type_str} exists.")
         _FCODE_ARGUMENT_ATTR_HOOKS[type_str] = func
         return func
-    if f is not None:
-        return wrapper(f)
-    else:
-        return wrapper
+    return wrapper
 
 def _get_attr_hook(type_str: str):
     res = _FCODE_ARGUMENT_ATTR_HOOKS.get(type_str, None)
@@ -668,7 +665,7 @@ class FunctionCode(object):
             pyanno: Optional[str] = None):
         """add a argument.
         """
-        type = type.strip()
+        type = str(type).strip()
         args: List[Argument] = []
         if "[" not in name:
             name_part = name.split(",")
