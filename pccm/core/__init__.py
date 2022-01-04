@@ -20,7 +20,7 @@ from pccm.core.funccode import Argument, TemplateTypeArgument, TemplateNonTypeAr
 import functools 
 
 
-_HEADER_ONLY_PRE_ATTRS = set(["static", "virtual"])  # type: Set[str]
+_HEADER_ONLY_PRE_ATTRS = set(["static", "virtual", "friend"])  # type: Set[str]
 _HEADER_ONLY_POST_ATTRS = set(["final", "override",
                                "noexcept"])  # type: Set[str]
 
@@ -54,7 +54,8 @@ class FunctionMeta(object):
                  macro_guard: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc",
-                 header_only: Optional[bool] = None):
+                 header_only: Optional[bool] = None,
+                 friend: bool = False):
         self.name = name
         if attrs is None:
             attrs = []
@@ -72,6 +73,7 @@ class FunctionMeta(object):
         self.pure_virtual = pure_virtual
         self.macro_guard = macro_guard
         self.header_only_user = header_only
+        self.friend = friend
 
     def get_pre_attrs(self) -> List[str]:
         res = self.attrs.copy()  # type: List[str]
@@ -258,6 +260,7 @@ class StaticMemberFunctionMeta(FunctionMeta):
         return res
 
 
+
 class ExternalFunctionMeta(FunctionMeta):
     """external function will be put above
     """
@@ -269,7 +272,11 @@ class ExternalFunctionMeta(FunctionMeta):
                  macro_guard: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc",
-                 header_only: Optional[bool] = None):
+                 header_only: Optional[bool] = None,
+                 friend: bool = False):
+        # TODO better handle friend method
+        # currently we only support direct friend method
+        # declaration. 
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
@@ -277,7 +284,14 @@ class ExternalFunctionMeta(FunctionMeta):
                          macro_guard=macro_guard,
                          impl_loc=impl_loc,
                          impl_file_suffix=impl_file_suffix,
-                         header_only=header_only)
+                         header_only=header_only,
+                         friend=friend)
+
+    def get_pre_attrs(self) -> List[str]:
+        res = super().get_pre_attrs()  # type: List[str]
+        if self.friend:
+            res.append("friend")
+        return res
 
 class Typedef(object):
     def __init__(self, name: str, content: str):
@@ -392,6 +406,7 @@ class FunctionCode(object):
         self.ret_pyanno = None  # type: Optional[str]
         self.func_doc = None  # type: Optional[str]
         self.code_after_include = None  # type: Optional[str]
+        self.code_in_ns = None  # type: Optional[str]
 
         self._additional_pre_attrs = []  # type: List[str]
 
@@ -1556,7 +1571,8 @@ class CodeSectionClassDef(CodeSection):
             prefix = code_before_cls + [
                 "struct {class_name} {{".format(class_name=self.class_name)
             ]
-        block = Block("\n".join(prefix), class_contents, "};")
+        post = ["};"] + self.code_after
+        block = Block("\n".join(prefix), class_contents, "\n".join(post))
         return block
 
 
@@ -1571,12 +1587,14 @@ class CodeSectionImpl(CodeSection):
     """
     def __init__(self, namespace: str, class_typedefs: List[str],
                  includes: List[str], func_impls: List[str],
-                 code_after_includes: List[str]):
+                 code_after_includes: List[str],
+                 code_in_ns: List[str]):
         self.namespace = namespace
         self.includes = includes
         self.class_typedefs = class_typedefs
         self.func_impls = func_impls
         self.code_after_includes = code_after_includes
+        self.code_in_ns = code_in_ns
 
     def to_string(self) -> str:
         namespace_before, namespace_after = self.generate_namespace(
@@ -1586,6 +1604,7 @@ class CodeSectionImpl(CodeSection):
         ns_after = "\n".join(namespace_after)
         block = Block("", [
             include_str, *self.code_after_includes, ns_before,
+            *self.code_in_ns,
             *self.class_typedefs, *self.func_impls, ns_after
         ],
                       indent=0)
@@ -1654,7 +1673,14 @@ class AutoClassGenerator(ParameterizedClass):
 
 class ManualClassTransformer(object):
     """modify existing Class.
+    some examples:
+    1. json serializer: use class_meta
+    2. modify function code: use decorator
+
     """
+    def add_members_functions(self, cu: Class, mw_meta: MiddlewareMeta) -> Tuple[List[Member], List[FunctionDecl]]:
+        raise NotImplementedError
+
     def handle_function_decl(self, cu: Class, func_decl: FunctionDecl,
                              mw_meta: MiddlewareMeta):
         pass
@@ -1729,6 +1755,25 @@ class CodeGenerator(object):
                         new_pcls.handle_member(cu, member, mw_meta)
                     uid = new_pcls.namespace + "-" + type(new_pcls).__name__
                     new_uid_to_cu[uid] = new_pcls
+            # elif isinstance(middleware, ManualClassTransformer):
+            #     for k, cu in uid_to_cu.items():
+            #         # 
+            #         decls_with_meta = [
+            #         ]  # type: List[Tuple[FunctionDecl, MiddlewareMeta]]
+            #         members_with_meta = [
+            #         ]  # type: List[Tuple[Member, MiddlewareMeta]]
+            #         # TODO only one meta is allowed
+            #         for decl in cu._function_decls:
+            #             for mw_meta in decl.meta.mw_metas:
+            #                 if mw_meta.type is mw_type:
+            #                     decls_with_meta.append((decl, mw_meta))
+            #         for member in cu._members:
+            #             for mw_meta in member.mw_metas:
+            #                 if mw_meta.type is mw_type:
+            #                     members_with_meta.append((member, mw_meta))
+            #         if not decls_with_meta and not members_with_meta:
+            #             continue
+
             else:
                 raise NotImplementedError
 
@@ -1967,9 +2012,11 @@ class CodeGenerator(object):
         static_functions_index_decl = []  # type: List[Tuple[int, str]]
         ctors_index_decl = []  # type: List[Tuple[int, str]]
         dtors_index_decl = []  # type: List[Tuple[int, str]]
+        friend_global_func_decl = []  # type: List[Tuple[int, str]]
 
         impl_dict_cls = OrderedDict()  # type: Dict[str, List[str]]
         impl_dict_code_after_inc = OrderedDict()  # type: Dict[str, List[str]]
+        impl_dict_code_in_ns = OrderedDict()  # type: Dict[str, List[str]]
 
         impl_only_deps = OrderedDict()  # type: Dict[str, List[Class]]
         # TODO overload function
@@ -1998,6 +2045,8 @@ class CodeGenerator(object):
                 impl_dict_cls[impl_file_name] = []
             if impl_file_name not in impl_dict_code_after_inc:
                 impl_dict_code_after_inc[impl_file_name] = []
+            if impl_file_name not in impl_dict_code_in_ns:
+                impl_dict_code_in_ns[impl_file_name] = []
 
             func_decl_str = code_obj.get_sig(func_name, meta)
             bound_name = cu_name
@@ -2009,7 +2058,10 @@ class CodeGenerator(object):
             if isinstance(meta, MemberFunctionMeta):
                 member_functions_index_decl.append((index, func_decl_str))
             elif isinstance(meta, ExternalFunctionMeta):
-                ext_functions_decl.append(func_decl_str)
+                if meta.friend:
+                    friend_global_func_decl.append((index, func_decl_str))
+                else:
+                    ext_functions_decl.append(func_decl_str)
             elif isinstance(meta, ConstructorMeta):
                 ctors_index_decl.append((index, func_decl_str))
             elif isinstance(meta, StaticMemberFunctionMeta):
@@ -2023,6 +2075,10 @@ class CodeGenerator(object):
                 if code_obj.code_after_include is not None:
                     impl_dict_code_after_inc[impl_file_name].append(
                         code_obj.code_after_include)
+                if code_obj.code_in_ns is not None:
+                    impl_dict_code_in_ns[impl_file_name].append(
+                        code_obj.code_in_ns)
+
             else:
                 assert code_obj.code_after_include is None, "header only don't support code after include."
             # handle impl-only dependency
@@ -2049,7 +2105,8 @@ class CodeGenerator(object):
                                     impl_only_deps[impl_file_name].append(udep)
         cls_funcs_with_index = (member_functions_index_decl +
                                 ctors_index_decl +
-                                static_functions_index_decl + dtors_index_decl)
+                                static_functions_index_decl + dtors_index_decl + 
+                                friend_global_func_decl)
         cls_funcs_with_index.sort(key=lambda x: x[0])
         cls_funcs = [c[1] for c in cls_funcs_with_index]
         code_cls_def = cu.get_code_class_def(cu_name, ext_functions_decl,
@@ -2077,14 +2134,15 @@ class CodeGenerator(object):
                 code_impl = CodeSectionImpl(cu.namespace,
                                             cu_typedefs + impl_only_cls_alias,
                                             impl_includes, v,
-                                            impl_dict_code_after_inc[k])
+                                            impl_dict_code_after_inc[k],
+                                            impl_dict_code_in_ns[k])
                 impl_dict[k] = code_impl
         for k, (suffix, mains) in cu._impl_mains.items():
             impl_key = "{}/{}{}".format(cu.namespace.replace(".", "/"), k,
                                         suffix)
             code_impl = CodeSectionImpl(
                 "", cu_typedefs, ["#include <{}>".format(cu.include_file)],
-                mains, [])
+                mains, [], [])
             impl_dict[impl_key] = code_impl
 
         code_header = CodeSectionHeader(cu.namespace, cu._global_codes,

@@ -153,6 +153,7 @@ def external_function(func=None,
                       impl_loc: str = "",
                       impl_file_suffix: str = ".cc",
                       header_only: Optional[bool] = None,
+                      friend: bool = False,
                       name=None):
     meta = ExternalFunctionMeta(name=name,
                                 inline=inline,
@@ -161,7 +162,8 @@ def external_function(func=None,
                                 macro_guard=macro_guard,
                                 impl_loc=impl_loc,
                                 impl_file_suffix=impl_file_suffix,
-                                header_only=header_only)
+                                header_only=header_only,
+                                friend=friend)
     return meta_decorator(func, meta)
 
 
