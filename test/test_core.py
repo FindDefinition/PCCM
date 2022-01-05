@@ -2,14 +2,16 @@ import shutil
 from pathlib import Path
 
 import ccimport
-
+import pccm
 from pccm import builder, core
 from pccm.middlewares import pybind
-from pccm.test_data.mod import PbTestVirtual, Test3, Test4
-
+from pccm.test_data.mod import PbTestVirtual, Test3, Test4, OtherSimpleClass
+import pickle 
 
 def test_core():
     cu = Test4()
+    cu2 = OtherSimpleClass()
+
     cu_scratch = core.Class()
     scratch_meta = core.StaticMemberFunctionMeta(name="scratch_func")
     scratch_code_obj = core.FunctionCode("")
@@ -20,7 +22,7 @@ def test_core():
     cu_scratch.namespace = "scratch"
     cu_scratch.class_name = "ScratchClass"
     lib = builder.build_pybind(
-        [cu_scratch, cu, PbTestVirtual()],
+        [cu_scratch, cu, cu2, PbTestVirtual()],
         Path(__file__).parent / "wtf2")
     assert lib.pccm.test_data.mod.Test4.add_static(1, 2) == 3
     assert not hasattr(lib.pccm.test_data.mod.Test4, "invalid_method")
@@ -48,6 +50,13 @@ def test_core():
     assert vobj.EnumExample.kValue1.value == 1
     assert vobj.EnumExample.kValue1 | vobj.EnumExample.kValue2 == 3
     assert vobj.kValue1 | vobj.kValue2 == 3
+
+    tsc = lib.pccm.test_data.mod.OtherSimpleClass()
+    tsc.a = 444
+    tsc_bytes = pickle.dumps(tsc)
+
+    tsc_recover = pickle.loads(tsc_bytes)
+    print(tsc_recover.a)
 
 
 if __name__ == "__main__":

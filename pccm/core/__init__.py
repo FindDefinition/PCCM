@@ -670,8 +670,7 @@ class FunctionCode(object):
         """
         blocks = []  # List[Union[Block, str]]
         blocks.extend(self._blocks)
-        block = Block("{", blocks, "}")
-        return "\n".join(generate_code(block, 0, 2))
+        return "\n".join(generate_code_list(blocks, 0, 2))
 
     def arg(self,
             name: str,
@@ -856,6 +855,9 @@ class Class(object):
         self._this_type_to_members = {
             None: []
         }  # type: Dict[Optional[Type[Class]], List[Member]]
+        self._this_type_to_cls_mw_metas = {
+            None: []
+        }  # type: Dict[Optional[Type[Class]], List[MiddlewareMeta]]
 
         # self._param_class = OrderedDict(
         # )  # type: OrderedDict[str, List[Tuple[ParameterizedClass, Optional[str]]]]
@@ -949,6 +951,13 @@ class Class(object):
         if this_type not in self._this_type_to_members:
             self._this_type_to_members[this_type] = []
         return self._this_type_to_members[this_type]
+
+    @property
+    def _local_class_mw_metas(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_cls_mw_metas:
+            self._this_type_to_cls_mw_metas[this_type] = []
+        return self._this_type_to_cls_mw_metas[this_type]
 
     @property
     def _param_class(self):
@@ -1116,6 +1125,9 @@ class Class(object):
         # TODO check decl name
         self._check_graph_init()
         self._function_decls.append(decl)
+
+    def add_local_class_middleware_meta(self, meta: MiddlewareMeta):
+        self._local_class_mw_metas.append(meta)
 
     def _assign_overload_flag_to_func_decls(self):
         # TODO member function can't overload static function.
@@ -1649,6 +1661,8 @@ class ManualClass(ParameterizedClass):
                       mw_meta: MiddlewareMeta):
         pass
 
+    def handle_class_meta(self, cu: Class, mw_meta: MiddlewareMeta):
+        pass
 
 class ManualClassGenerator(abc.ABC):
     """generate additional Class based on existed Class.
@@ -1753,6 +1767,10 @@ class CodeGenerator(object):
                         new_pcls.handle_function_decl(cu, decl, mw_meta)
                     for member, mw_meta in members_with_meta:
                         new_pcls.handle_member(cu, member, mw_meta)
+                    cu_cls_meta = cu._local_class_mw_metas
+                    for mw_meta in cu_cls_meta:
+                        new_pcls.handle_class_meta(cu, mw_meta)
+
                     uid = new_pcls.namespace + "-" + type(new_pcls).__name__
                     new_uid_to_cu[uid] = new_pcls
             # elif isinstance(middleware, ManualClassTransformer):
@@ -1884,7 +1902,6 @@ class CodeGenerator(object):
         # perform post-order here because we need to handle leaf nodes first in following process.
         uid_to_cu = self._postorder_sort(cus)
         # uid_to_cu = OrderedDict(reversed(uid_to_cu.items()))
-
         if run_middleware:
             self._apply_middleware_to_cus(uid_to_cu)
         return list(uid_to_cu.values())

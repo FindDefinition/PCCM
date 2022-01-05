@@ -356,6 +356,13 @@ class Pybind11PropMeta(Pybind11Meta):
         self.readwrite = readwrite
         self.name = name
 
+class Pybind11ClassMwMeta(Pybind11Meta):
+    """may add some attributes in future.
+    """
+    def __init__(self, raw_code: FunctionCode):
+        super().__init__(Pybind11SplitImpl)
+        self.raw_code = raw_code
+
 
 class Pybind11BindMethodMeta(Pybind11Meta):
     """may add some attributes in future.
@@ -533,6 +540,12 @@ class PybindClassMixin:
                             mw_metas=mw_metas_part)
         return
 
+    def add_raw_def(self: "Class",
+                          content: str):
+        code = FunctionCode()
+        code.raw(content)
+        self.add_local_class_middleware_meta(Pybind11ClassMwMeta(code))
+        return
 
 def _postprocess_class(cls_name: str,
                        cls_namespace: str,
@@ -540,8 +553,11 @@ def _postprocess_class(cls_name: str,
                        decls: List[Union[PybindMethodDecl, PybindPropDecl]],
                        enum_classes: List[EnumClass],
                        parent_ns: str = "",
-                       module_local: bool = False):
+                       module_local: bool = False,
+                       raw_defs: Optional[List[FunctionCode]] = None):
     has_virtual = False
+    if raw_defs is None:
+        raw_defs = []
     vblock = None  # Optional[Block]
     virtual_decls = []  # type: List[PybindMethodDecl]
     method_decls = []  # type: List[PybindMethodDecl]
@@ -623,6 +639,10 @@ def _postprocess_class(cls_name: str,
     if not has_constructor:
         cls_def_stmts.append(
             "{}.def(pybind11::init<>());".format(cls_def_name))
+    for raw_def in raw_defs:
+        cls_def_stmts.append(
+            "{}.def({});".format(cls_def_name, raw_def.inspect_body()))
+
     for decl in decls:
         if isinstance(decl, PybindMethodDecl
                       ) and decl.method_type == MethodType.PropSetter:
@@ -893,6 +913,7 @@ class Pybind11SingleClassHandler(ManualClass):
 
         self.bind_func_name = "bind_{}".format(cu.class_name)
         self.raw_bind_annos: List[str] = []
+        self.raw_defs: List[FunctionCode] = []
 
     def get_pybind_decls(
             self) -> List[Union[PybindMethodDecl, PybindPropDecl]]:
@@ -916,6 +937,10 @@ class Pybind11SingleClassHandler(ManualClass):
         self.prop_decls.append(
             PybindPropDecl(member_decl, cu.namespace, cu.class_name, mw_meta))
 
+    def handle_class_meta(self, cu: Class, mw_meta: Pybind11ClassMwMeta):
+        assert cu.namespace is not None
+        self.raw_defs.append(mw_meta.raw_code)
+
     def postprocess(self, parent_is_pybind: bool = False):
         if self.built:
             return
@@ -935,7 +960,8 @@ class Pybind11SingleClassHandler(ManualClass):
                                                    self.get_pybind_decls(),
                                                    self.cu._enum_classes,
                                                    parent_name,
-                                                   module_local)
+                                                   module_local,
+                                                   self.raw_defs)
         func_meta.name = self.bind_func_name
         if vblock is not None:
             bind_code.code_after_include = "\n".join(

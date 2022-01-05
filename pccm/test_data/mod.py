@@ -119,3 +119,24 @@ class PbTestVirtual(pccm.Class, pccm.pybind.PybindClassMixin):
         code = pccm.FunctionCode("return func_2(a, b);").ret("int")
         code.arg("a,b", "int")
         return code
+
+class OtherSimpleClass(pccm.Class, pccm.pybind.PybindClassMixin):
+    def __init__(self):
+        super().__init__()
+        self.add_pybind_member("a", "int", "0")
+        self.add_raw_def(f"""
+        pybind11::pickle(
+            [](const {self.class_name} &p) {{ // __getstate__
+                /* Return a tuple that fully encodes the state of the object */
+                return pybind11::make_tuple(p.a);
+            }},
+            [](pybind11::tuple t) {{ // __setstate__
+                if (t.size() != 1)
+                    throw std::runtime_error("Invalid state!");
+
+                /* Create a new C++ instance */
+                {self.class_name} p{{t[0].cast<int>()}};
+                return p;
+            }}
+        )
+        """)
