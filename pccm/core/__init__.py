@@ -1,24 +1,23 @@
 import abc
 import contextlib
 import difflib
+import functools
 import inspect
 import types
 from collections import OrderedDict, defaultdict, deque
 from pathlib import Path
-from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import (Any, Callable, Deque, Dict, List, Optional, Set, Tuple,
+                    Type, Union)
 
 from ccimport import compat, loader
-
 from pccm.constants import (PCCM_CLASS_META_KEY, PCCM_FUNC_META_KEY,
                             PCCM_INIT_DECORATOR_KEY)
 from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
+from pccm.core.funccode import (Argument, TemplateNonTypeArgument,
+                                TemplateTypeArgument)
 from pccm.core.parsers import arg_parser
 from pccm.utils import get_qualname_of_type
-
-from pccm.core.funccode import Argument, TemplateTypeArgument, TemplateNonTypeArgument
-import functools 
-
 
 _HEADER_ONLY_PRE_ATTRS = set(["static", "virtual", "friend"])  # type: Set[str]
 _HEADER_ONLY_POST_ATTRS = set(["final", "override",
@@ -29,7 +28,11 @@ class MiddlewareMeta(object):
     def __init__(self, mw_type: Type["_MW_TYPES"]):
         self.type = mw_type
 
-_FCODE_ARGUMENT_ATTR_HOOKS: Dict[str, Callable[["FunctionCode", List[Argument]], None]] = {}
+
+_FCODE_ARGUMENT_ATTR_HOOKS: Dict[str,
+                                 Callable[["FunctionCode", List[Argument]],
+                                          None]] = {}
+
 
 def register_arg_attr_hook(type_str: str):
     def wrapper(func):
@@ -37,11 +40,14 @@ def register_arg_attr_hook(type_str: str):
             raise KeyError(f"{type_str} exists.")
         _FCODE_ARGUMENT_ATTR_HOOKS[type_str] = func
         return func
+
     return wrapper
+
 
 def _get_attr_hook(type_str: str):
     res = _FCODE_ARGUMENT_ATTR_HOOKS.get(type_str, None)
     return res
+
 
 class FunctionMeta(object):
     def __init__(self,
@@ -94,7 +100,10 @@ class FunctionMeta(object):
 
 
 class ClassMeta(object):
-    def __init__(self, name: Optional[str] = None, skip_inherit: bool = False, mw_metas: Optional[List[Any]] = None ):
+    def __init__(self,
+                 name: Optional[str] = None,
+                 skip_inherit: bool = False,
+                 mw_metas: Optional[List[Any]] = None):
         self.skip_inherit = skip_inherit
         self.name = name
         if mw_metas is None:
@@ -260,7 +269,6 @@ class StaticMemberFunctionMeta(FunctionMeta):
         return res
 
 
-
 class ExternalFunctionMeta(FunctionMeta):
     """external function will be put above
     """
@@ -276,7 +284,7 @@ class ExternalFunctionMeta(FunctionMeta):
                  friend: bool = False):
         # TODO better handle friend method
         # currently we only support direct friend method
-        # declaration. 
+        # declaration.
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
@@ -292,6 +300,7 @@ class ExternalFunctionMeta(FunctionMeta):
         if self.friend:
             res.append("friend")
         return res
+
 
 class Typedef(object):
     def __init__(self, name: str, content: str):
@@ -419,11 +428,11 @@ class FunctionCode(object):
         return len(self._template_arguments) > 0
 
     def make_invalid(self):
-        self._invalid = True 
+        self._invalid = True
         return self
 
     def make_valid(self):
-        self._invalid = False 
+        self._invalid = False
         return self
 
     def is_invalid(self) -> bool:
@@ -469,8 +478,8 @@ class FunctionCode(object):
         self._impl_only_pdeps.append((subnamespace, param_class, name_alias))
 
     @contextlib.contextmanager
-    def block(self, prefix: str):
-        self._blocks.append(Block(prefix + "{", [], "}"))
+    def block(self, prefix: str, start: str = "{", end: str = "}"):
+        self._blocks.append(Block(prefix + start, [], end))
         yield
         last_block = self._blocks.pop()
         self._blocks[-1].body.append(last_block)
@@ -694,7 +703,11 @@ class FunctionCode(object):
                 if not arg_with_attr.name:
                     raise ValueError("you provide a empty name in", name)
                 args.append(
-                    Argument(arg_with_attr.name, type, default, pyanno=pyanno, attrs=arg_with_attr.attrs))
+                    Argument(arg_with_attr.name,
+                             type,
+                             default,
+                             pyanno=pyanno,
+                             attrs=arg_with_attr.attrs))
         hook = _get_attr_hook(type)
         if hook is not None:
             hook(self, args)
@@ -800,6 +813,13 @@ class FunctionDecl(object):
     def get_function_name(self) -> str:
         assert self.meta.name is not None
         return self.meta.name
+
+    def get_impl(self, class_name: str = ""):
+        return self.code.get_impl(self.get_function_name(), self.meta,
+                                  class_name)
+
+    def inspect_impl(self, class_name: str = ""):
+        return "\n".join(generate_code(self.get_impl(class_name), 0, 2))
 
 
 def _init_decorator(func, cls):
@@ -1599,8 +1619,7 @@ class CodeSectionImpl(CodeSection):
     """
     def __init__(self, namespace: str, class_typedefs: List[str],
                  includes: List[str], func_impls: List[str],
-                 code_after_includes: List[str],
-                 code_in_ns: List[str]):
+                 code_after_includes: List[str], code_in_ns: List[str]):
         self.namespace = namespace
         self.includes = includes
         self.class_typedefs = class_typedefs
@@ -1616,8 +1635,7 @@ class CodeSectionImpl(CodeSection):
         ns_after = "\n".join(namespace_after)
         block = Block("", [
             include_str, *self.code_after_includes, ns_before,
-            *self.code_in_ns,
-            *self.class_typedefs, *self.func_impls, ns_after
+            *self.code_in_ns, *self.class_typedefs, *self.func_impls, ns_after
         ],
                       indent=0)
         return "\n".join(generate_code(block, 0, 2))
@@ -1664,6 +1682,7 @@ class ManualClass(ParameterizedClass):
     def handle_class_meta(self, cu: Class, mw_meta: MiddlewareMeta):
         pass
 
+
 class ManualClassGenerator(abc.ABC):
     """generate additional Class based on existed Class.
     for example, pybind11
@@ -1692,7 +1711,9 @@ class ManualClassTransformer(object):
     2. modify function code: use decorator
 
     """
-    def add_members_functions(self, cu: Class, mw_meta: MiddlewareMeta) -> Tuple[List[Member], List[FunctionDecl]]:
+    def add_members_functions(
+            self, cu: Class, mw_meta: MiddlewareMeta
+    ) -> Tuple[List[Member], List[FunctionDecl]]:
         raise NotImplementedError
 
     def handle_function_decl(self, cu: Class, func_decl: FunctionDecl,
@@ -1775,7 +1796,7 @@ class CodeGenerator(object):
                     new_uid_to_cu[uid] = new_pcls
             # elif isinstance(middleware, ManualClassTransformer):
             #     for k, cu in uid_to_cu.items():
-            #         # 
+            #         #
             #         decls_with_meta = [
             #         ]  # type: List[Tuple[FunctionDecl, MiddlewareMeta]]
             #         members_with_meta = [
@@ -1862,8 +1883,7 @@ class CodeGenerator(object):
                         raise ValueError("cycle detected")
                     if dep not in cu_type_to_cu:
                         cu_type_to_cu[dep] = dep()
-                        extract_ns = extract_module_id_of_class(dep,
-                                                                root=root)
+                        extract_ns = extract_module_id_of_class(dep, root=root)
                         if extract_ns is None:
                             if root is not None:
                                 print(Path(root).resolve())
@@ -1876,8 +1896,7 @@ class CodeGenerator(object):
                     cur_type_trace_copy.add(dep)
                     stack.append((cu_type_to_cu[dep], cur_type_trace_copy))
 
-                for k, pcls_with_alias_tuples in cur_cu._param_class.items(
-                ):
+                for k, pcls_with_alias_tuples in cur_cu._param_class.items():
                     for pcls, _ in pcls_with_alias_tuples:
                         if type(pcls) in cur_type_trace:
                             raise ValueError("cycle detected")
@@ -1907,10 +1926,12 @@ class CodeGenerator(object):
         return list(uid_to_cu.values())
         # self.built = True
 
-    def _postorder_sort_recursive(self, cu: Class, items: List[Tuple[str, Class]], visited: Set[str]):
-        # TODO iter-based 
+    def _postorder_sort_recursive(self, cu: Class, items: List[Tuple[str,
+                                                                     Class]],
+                                  visited: Set[str]):
+        # TODO iter-based
         uid = cu.uid
-        assert uid is not None 
+        assert uid is not None
         if cu.uid in visited:
             return
         visited.add(uid)
@@ -2122,8 +2143,8 @@ class CodeGenerator(object):
                                     impl_only_deps[impl_file_name].append(udep)
         cls_funcs_with_index = (member_functions_index_decl +
                                 ctors_index_decl +
-                                static_functions_index_decl + dtors_index_decl + 
-                                friend_global_func_decl)
+                                static_functions_index_decl +
+                                dtors_index_decl + friend_global_func_decl)
         cls_funcs_with_index.sort(key=lambda x: x[0])
         cls_funcs = [c[1] for c in cls_funcs_with_index]
         code_cls_def = cu.get_code_class_def(cu_name, ext_functions_decl,

@@ -39,3 +39,4 @@ class TypeHandler(object):
                 if issubclass(obj_type, class_type):
                     return handler
         return None
+

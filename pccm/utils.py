@@ -2,7 +2,9 @@ import importlib.util
 import os
 import sys
 from typing import Type, TypeVar
+import re 
 
+_TYPE_STRING_PATTERN = re.compile(r"<class '(.*)'>")
 
 def project_is_editable(proj_name: str):
     """Is distribution an editable install?"""

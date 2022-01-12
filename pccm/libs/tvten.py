@@ -10,7 +10,7 @@ def handle_tv_tensor(code: FunctionCode, args: List[Argument]):
     """
     shape_keys: Set[str] = set()
     for arg in args:
-        attrs = arg.attrs 
+        attrs = arg.attrs
         if not attrs:
             continue
         dtype = str(attrs[0].value)
@@ -55,6 +55,7 @@ def handle_tv_tensor(code: FunctionCode, args: List[Argument]):
                 TV_ASSERT_INVALID_ARG({check_stmt}, 
                     "shape mismatch. expected: [{shape_str}], get:", {arg.name}.shape());
                 """)
+
 
 if __name__ == "__main__":
     code = FunctionCode()

@@ -21,7 +21,7 @@ REQUIRES_PYTHON = '>=3.6'
 VERSION = None
 
 # What packages are required for this module to be executed?
-REQUIRED = ["ccimport>=0.3.1", "pybind11>=2.6.0", "fire", "lark"]
+REQUIRED = ["ccimport>=0.3.1", "pybind11>=2.6.0", "fire", "lark>=1.0.0", "portalocker>=2.3.2"]
 
 # What packages are optional?
 EXTRAS = {
