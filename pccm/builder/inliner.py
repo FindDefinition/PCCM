@@ -25,6 +25,8 @@ from pccm.utils import UniqueNamePool, get_qualname_of_type
 
 PCCM_INLINE_MODULE_NAME = "inline_module"
 PCCM_INLINE_FUNCTION_NAME = "inline_function"
+PCCM_INLINE_INNER_FUNCTION_NAME = "inline_inner_function" # usually cuda global function
+
 PCCM_INLINE_NAMESPACE = "inline_namespace"
 PCCM_INLINE_CLASS_NAME = "InlineClass"
 
@@ -57,19 +59,20 @@ class MultiTypeKindError(Exception):
 
 class InlineBuilderPlugin:
     def handle_captured_type(self, name: str, code: FunctionCode,
-                             obj: Any) -> Optional[str]:
+                             obj: Any, user_arg: Optional[Any] = None) -> Optional[Tuple[str, str]]:
         raise NotImplementedError
 
-    def type_conversion(self, obj: Any):
+    def type_conversion(self, obj: Any, user_arg: Optional[Any] = None):
         return obj
 
-    def get_cpp_type(self, obj: Any) -> str:
+    def get_cpp_type(self, obj: Any, user_arg: Optional[Any] = None) -> str:
         raise NotImplementedError
 
 
 def nested_type_analysis(obj,
                          plugin_dict: Dict[str, InlineBuilderPlugin],
-                         iter_limit=10) -> Tuple[BaseType, BaseType]:
+                         iter_limit=10,
+                         user_arg: Optional[Any] = None) -> Tuple[BaseType, BaseType]:
     if isinstance(obj, (list, set)):
         types_union: Set[CppType] = set()
         mapped_type = CppType([])
@@ -78,7 +81,7 @@ def nested_type_analysis(obj,
                 break
             iter_limit -= 1
             type_s, type_mapped_s = nested_type_analysis(
-                o, plugin_dict, iter_limit)
+                o, plugin_dict, iter_limit, user_arg)
             cpp_type = CppType([DeclSpec(type_s)])
             mapped_type = CppType([DeclSpec(type_mapped_s)])
             types_union.add(cpp_type)
@@ -101,7 +104,7 @@ def nested_type_analysis(obj,
                 break
             iter_limit -= 1
             type_s, type_mapped_s = nested_type_analysis(
-                o, plugin_dict, iter_limit)
+                o, plugin_dict, iter_limit, user_arg)
 
             mapped_type_tuple.append(CppType([DeclSpec(type_mapped_s)]))
             type_tuple.append(CppType([DeclSpec(type_s)]))
@@ -119,9 +122,9 @@ def nested_type_analysis(obj,
                 break
             iter_limit -= 1
             key_type_s, key_m_s = nested_type_analysis(k, plugin_dict,
-                                                       iter_limit)
+                                                       iter_limit, user_arg)
             val_type_s, val_m_s = nested_type_analysis(v, plugin_dict,
-                                                       iter_limit)
+                                                       iter_limit, user_arg)
             key_mapped_type = CppType([DeclSpec(key_m_s)])
             val_mapped_type = CppType([DeclSpec(val_m_s)])
 
@@ -144,7 +147,7 @@ def nested_type_analysis(obj,
         base_str, is_custom = get_base_type_string(obj)
         res_mapped = base_str
         if is_custom:
-            res_mapped = plugin_dict[base_str].get_cpp_type(obj)
+            res_mapped = plugin_dict[base_str].get_cpp_type(obj, user_arg)
         return BaseType(QualifiedId([base_str]),
                         []), BaseType(QualifiedId([res_mapped]), [])
 
@@ -171,9 +174,9 @@ class CaptureStmt:
     is_expr: bool
     range_pair: Tuple[int, int]
     expr_names: List[str]
-    final_name: str
+    replaced_name: str
     replace_range_pairs: List[Tuple[int, int]]
-
+    arg_name: str
     def __init__(self, name: str, is_expr: bool, range_pair: Tuple[int, int],
                  replace_range_pairs: List[Tuple[int, int]]) -> None:
         self.name = name
@@ -183,7 +186,8 @@ class CaptureStmt:
         self.expr_names = []
         if is_expr:
             self.expr_names = extract_names_from_expr(name)
-        self.final_name = name
+        self.replaced_name = name
+        self.arg_name = name
 
 
 def get_save_root(path: Path):
@@ -201,7 +205,8 @@ def get_save_file(path: Path):
 
 
 def _nested_apply_plugin_transform(obj_type: BaseType, obj,
-                                   plugins: Dict[str, InlineBuilderPlugin]):
+                                   plugins: Dict[str, InlineBuilderPlugin],
+                                   user_arg: Optional[Any] = None):
     if obj_type.is_std_type():
         return obj
     qualname = obj_type.qualname
@@ -211,13 +216,13 @@ def _nested_apply_plugin_transform(obj_type: BaseType, obj,
             msg = f"can't find {qualname} in plugins, available: {plugins.keys()}"
             raise ValueError(msg)
         plugin = plugins[qualname]
-        return plugin.type_conversion(obj)
+        return plugin.type_conversion(obj, user_arg)
 
     elif qualname == "std::vector":
         res = []
         vt = obj_type.args[0].base_type
         for o in obj:
-            o_res = _nested_apply_plugin_transform(vt, o, plugins)
+            o_res = _nested_apply_plugin_transform(vt, o, plugins, user_arg)
             res.append(o_res)
         return res
     elif qualname == "std::unordered_map":
@@ -226,7 +231,7 @@ def _nested_apply_plugin_transform(obj_type: BaseType, obj,
         vt = obj_type.args[1].base_type
         assert kt.is_simple_type(), "only support simple type for key"
         for (ok, ov) in obj.items():
-            res[ok] = _nested_apply_plugin_transform(vt, ov, plugins)
+            res[ok] = _nested_apply_plugin_transform(vt, ov, plugins, user_arg)
         return res
     elif qualname == "std::unordered_set":
         assert obj_type.is_std_type()
@@ -238,7 +243,7 @@ def _nested_apply_plugin_transform(obj_type: BaseType, obj,
             if ott.is_std_type():
                 res.append(o)
             else:
-                res.append(_nested_apply_plugin_transform(ott, o, plugins))
+                res.append(_nested_apply_plugin_transform(ott, o, plugins, user_arg))
         return tuple(res)
     else:
         raise NotImplementedError
@@ -264,13 +269,13 @@ def _expr_str_to_identifier(name: str):
 
 class NumpyPlugin(InlineBuilderPlugin):
     def handle_captured_type(self, name: str, code: FunctionCode,
-                             obj: Any) -> Optional[str]:
+                             obj: Any, user_arg: Optional[Any] = None) ->  Optional[Tuple[str, str]]:
         return
 
-    def type_conversion(self, obj: Any):
+    def type_conversion(self, obj: Any, user_arg: Optional[Any] = None):
         return obj
 
-    def get_cpp_type(self, obj: Any) -> str:
+    def get_cpp_type(self, obj: Any, user_arg: Optional[Any] = None) -> str:
         return "pybind11::array"
 
 
@@ -309,13 +314,16 @@ class InlineBuilder:
     def __init__(
             self,
             deps: List[Type[Class]],
-            plugins: Optional[Dict[str, InlineBuilderPlugin]] = None) -> None:
+            plugins: Optional[Dict[str, InlineBuilderPlugin]] = None,
+            build_kwargs: Optional[Dict[str, Any]] = None) -> None:
         self.deps = deps
         if plugins is None:
             self.plugins = _DEFAULT_PLUGINS
         else:
             self.plugins = plugins
-
+        if build_kwargs is None:
+            build_kwargs = {}
+        self.build_kwargs = build_kwargs
         self.module_functions: Dict[Tuple[str, str, int], Any] = {}
         self.cached_captures: Dict[Tuple[str, str, int],
                                    List[CaptureStmt]] = {}
@@ -338,9 +346,14 @@ class InlineBuilder:
                 return path.stem
         return None
 
-    def create_code(self, code_str: str, code: FunctionCode,
+    def handle_container_code(self, code_str: str, code: FunctionCode,
                     arg: Optional[Any]):
         code.raw(code_str)
+
+    def create_inner_decl(self, code_str: str, container_fcode: FunctionCode, inner_fcode: FunctionCode,
+                    arg: Optional[Any]) -> Optional[FunctionDecl]:
+        
+        return None 
 
     def inline(self,
                name: str,
@@ -349,11 +362,14 @@ class InlineBuilder:
                additional_vars: Optional[Dict[str, Any]] = None,
                *,
                _frame_cnt: int = 1,
-               create_code_arg: Optional[Any] = None):
-        """use $var to capture python objects, ~20-100us run overhead. 
+               user_arg: Optional[Any] = None):
+        """use $var to capture python objects, use $(var.shape[0]) to capture expr.
+        ~20-100us run overhead. 
         only support: 
         1. int/float/str and nested containers of int/float/str.
         2. custom type via plugins
+        TODO add generic CUDA kernel support, currently we can only use cuda kernel via
+        extended lambda.
         """
         if isinstance(code, FunctionCode):
             code_str = code.inspect_body()
@@ -417,7 +433,8 @@ class InlineBuilder:
                         unique_name[all_captures[-1].name] = all_captures[-1]
                 # 2. find captures in prev frame
 
-                final_code = FunctionCode()
+                container_fcode = FunctionCode()
+                inner_fcode = FunctionCode()
                 # 3. inference c++ types
                 args = []
                 name_pool = UniqueNamePool()
@@ -441,15 +458,14 @@ class InlineBuilder:
                         obj = eval(cap.name, local_vars)
                     # apply non-anonymous vars (expr are anonymous vars)
                     cpp_type, mapped_cpp_type = nested_type_analysis(
-                        obj, self.plugins)
+                        obj, self.plugins, user_arg=user_arg)
                     obj = _nested_apply_plugin_transform(
-                        cpp_type, obj, self.plugins)
-                    if not cap.is_expr:
-                        arg_name = cap.final_name
-                    else:
-                        arg_name = name_pool(
-                            _expr_str_to_identifier(cap.final_name))
-
+                        cpp_type, obj, self.plugins, user_arg)
+                    if cap.is_expr:
+                        cap.replaced_name = name_pool(
+                            _expr_str_to_identifier(cap.replaced_name))
+                    arg_name = cap.replaced_name
+                    inner_cpp_type = str(mapped_cpp_type)
                     if not cap.is_expr:
                         if not cpp_type.is_std_type():
                             # custom type, must apply plugin
@@ -457,53 +473,66 @@ class InlineBuilder:
                             # here we only apply handle_captured_type on non-container custom type.
                             if qualname in self.plugins:
                                 plugin = self.plugins[qualname]
-                                new_arg_name = plugin.handle_captured_type(
-                                    cap.name, final_code, obj)
-                                if new_arg_name is not None:
+                                res = plugin.handle_captured_type(
+                                    cap.name, container_fcode, obj, user_arg)
+                                if res is not None:
+                                    new_arg_name, inner_cpp_type = res
                                     arg_name = new_arg_name
 
                     capture_bts.append(cpp_type)
                     args.append(obj)
-                    final_code.arg(arg_name, str(mapped_cpp_type))
+                    cap.arg_name = arg_name
+                    container_fcode.arg(arg_name, str(mapped_cpp_type))
+                    inner_fcode.arg(cap.replaced_name, inner_cpp_type)
                     for rr in cap.replace_range_pairs:
-                        replace = Replace(cap.final_name, *rr)
+                        replace = Replace(cap.replaced_name, *rr)
                         replaces.append(replace)
                 for k, v in additional_vars.items():
-                    _, mapped_cpp_type = nested_type_analysis(v, self.plugins)
-                    final_code.arg(k, str(mapped_cpp_type))
+                    _, mapped_cpp_type = nested_type_analysis(v, self.plugins, user_arg=user_arg)
+                    container_fcode.arg(k, str(mapped_cpp_type))
                     args.append(v)
 
-                final_code_str = execute_modifiers(code_str, replaces)
-                assert final_code_str is not None
+                inner_code_str = execute_modifiers(code_str, replaces)
+                assert inner_code_str is not None
                 if isinstance(code, FunctionCode):
-                    final_code.ret(code.return_type)
-                self.create_code(final_code_str, final_code, create_code_arg)
+                    container_fcode.ret(code.return_type)
+                self.handle_container_code(inner_code_str, container_fcode, user_arg)
+                inner_decl = self.create_inner_decl(inner_code_str, container_fcode, inner_fcode, user_arg)
+
                 # now we have complete code. we need to determine a history build dir and use it to build library if need.
                 # here we must reserve build dir because we need to rebuild when dependency change.
-                meta = StaticMemberFunctionMeta(
-                    name=PCCM_INLINE_FUNCTION_NAME,
-                    impl_file_suffix=impl_file_suffix)
+                meta = StaticMemberFunctionMeta(impl_file_suffix=impl_file_suffix)
                 meta.mw_metas.append(Pybind11MethodMeta())
-                decl = FunctionDecl(meta, final_code)
-                final_code_str = decl.inspect_impl()
-                # print(final_code_str)
-                # final_code_hash = hashlib.sha256(code_str.encode('utf-8')).hexdigest()
+                decl = FunctionDecl(meta, container_fcode)
+                decl.meta.name = PCCM_INLINE_FUNCTION_NAME
+                # container_fcode_str = decl.inspect_impl()
+                # container_fcode_hash = hashlib.sha256(code_str.encode('utf-8')).hexdigest()
 
                 pccm_class = InlineClass()
                 pccm_class.class_name = PCCM_INLINE_CLASS_NAME
                 pccm_class.add_func_decl(decl)
+                for dep in decl.code._impl_only_deps:
+                    pccm_class.add_impl_only_dependency_by_name(
+                        decl.meta.name, dep)
+                if inner_decl is not None:
+                    inner_decl.meta.name = PCCM_INLINE_INNER_FUNCTION_NAME
+                    pccm_class.add_func_decl(inner_decl)
+                    for dep in inner_decl.code._impl_only_deps:
+                        pccm_class.add_impl_only_dependency_by_name(
+                            inner_decl.meta.name, dep)
+
                 pccm_class.add_dependency(*self.deps)
                 pccm_class.namespace = PCCM_INLINE_NAMESPACE
                 # name format: code_hash + line + pid
                 # if name == "":
-                #     prev_mod_name = self._find_exist_module_name(final_code_str, final_code_hash, mod_root)
+                #     prev_mod_name = self._find_exist_module_name(container_fcode_str, container_fcode_hash, mod_root)
                 # else:
                 # to avoid multi-process problem, we need to
                 prev_mod_name = name
                 # if prev_mod_name is None:
-                #     prev_mod_name = f"_{final_code_hash}_{lineno}_{os.getpid()}"
+                #     prev_mod_name = f"_{container_fcode_hash}_{lineno}_{os.getpid()}"
                 #     out_lib_meta_path = mod_root / f"{prev_mod_name}.json"
-                #     meta = ModuleMetaData(final_code_str, self.dep_ids)
+                #     meta = ModuleMetaData(container_fcode_str, self.dep_ids)
                 #     with out_lib_meta_path.open("w") as f:
                 #         json.dump(dataclasses.asdict(meta), f)
                 out_lib_path = mod_root / prev_mod_name
@@ -513,7 +542,9 @@ class InlineBuilder:
                 with portalocker.Lock(str(file_lock)) as fh:
                     mod = build_pybind([pccm_class],
                                        out_lib_path,
-                                       build_dir=build_dir)
+                                       build_dir=build_dir,
+                                       **self.build_kwargs)
+
                 self.module_functions[unique_key] = getattr(
                     getattr(getattr(mod, PCCM_INLINE_NAMESPACE),
                             PCCM_INLINE_CLASS_NAME), PCCM_INLINE_FUNCTION_NAME)
@@ -542,7 +573,7 @@ class InlineBuilder:
                         )
                 # eval expr in prev frame
                 obj = eval(cap.name, local_vars)
-            obj = _nested_apply_plugin_transform(bt, obj, self.plugins)
+            obj = _nested_apply_plugin_transform(bt, obj, self.plugins, user_arg)
             args.append(obj)
         for v in additional_vars.values():
             args.append(v)
@@ -568,7 +599,6 @@ def main():
         b.inline(
             "just_a_name", f"""
         // pybind::array
-        // tv::Tensor
         float* ptr = reinterpret_cast<float*>($a[0].mutable_data());
         float* ptr2 = reinterpret_cast<float*>($a[1].mutable_data());
 
@@ -578,6 +608,8 @@ def main():
         tt = time.time() - t
         print(tt)
         print(aa[0])
+
+
 
 
 if __name__ == "__main__":
