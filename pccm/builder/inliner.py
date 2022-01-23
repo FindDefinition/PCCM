@@ -190,13 +190,20 @@ class CaptureStmt:
         self.arg_name = name
 
 
-def get_save_root(path: Path):
-    import_parts = loader.try_capture_import_parts(path)
+def get_save_root(path: Path, root: Optional[Path] = None, build_root: Optional[Path] = None):
+    if root is not None:
+        relative_parts = path.parent.relative_to(root)
+        import_parts = list(relative_parts.parts)
+    else:
+        import_parts = loader.try_capture_import_parts(path)
     if import_parts is None:
         raise NotImplementedError("you must use inline "
                                   "in a standard python project with "
                                   "pip installed.")
-    res = PCCM_INLINE_LIBRARY_PATH / "/".join(import_parts)
+    if build_root is not None:
+        res = build_root / "/".join(import_parts)
+    else:
+        res = PCCM_INLINE_LIBRARY_PATH / "/".join(import_parts)
     return res
 
 
@@ -315,6 +322,8 @@ class InlineBuilder:
             self,
             deps: List[Type[Class]],
             plugins: Optional[Dict[str, InlineBuilderPlugin]] = None,
+            root: Optional[Path] = None,
+            build_root: Optional[Path] = None,
             build_kwargs: Optional[Dict[str, Any]] = None) -> None:
         self.deps = deps
         if plugins is None:
@@ -335,6 +344,8 @@ class InlineBuilder:
         self.dep_ids = [get_qualname_of_type(t) for t in self.deps]
         self.dep_ids.sort()
         self.used_names: Set[Tuple[str, str]] = set()
+        self.root = root
+        self.build_root = build_root
 
     def _find_exist_module_name(self, code: str, code_hash: str, root: Path):
         cur_dep_ids = self.dep_ids
@@ -363,13 +374,11 @@ class InlineBuilder:
                *,
                _frame_cnt: int = 1,
                user_arg: Optional[Any] = None):
-        """use $var to capture python objects, use $(var.shape[0]) to capture expr.
+        """use $var to capture python objects, use $(var.shape[0]) to capture anonymous expr.
         ~20-100us run overhead. 
         only support: 
         1. int/float/str and nested containers of int/float/str.
         2. custom type via plugins
-        TODO add generic CUDA kernel support, currently we can only use cuda kernel via
-        extended lambda.
         """
         if isinstance(code, FunctionCode):
             code_str = code.inspect_body()
@@ -399,7 +408,7 @@ class InlineBuilder:
             if key in self.used_names and not exist:
                 raise ValueError("you use duplicate name in same file.")
             if not exist:
-                mod_root = get_save_root(Path(code_path))
+                mod_root = get_save_root(Path(code_path), self.root, self.build_root)
                 mod_root.mkdir(mode=0o755, parents=True, exist_ok=True)
                 # 1. extract captured vars
                 it = source_iter.CppSourceIterator(code_str)
