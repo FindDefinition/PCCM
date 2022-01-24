@@ -373,7 +373,8 @@ class InlineBuilder:
                additional_vars: Optional[Dict[str, Any]] = None,
                *,
                _frame_cnt: int = 1,
-               user_arg: Optional[Any] = None):
+               user_arg: Optional[Any] = None,
+               timeout: float=999999.0):
         """use $var to capture python objects, use $(var.shape[0]) to capture anonymous expr.
         ~20-100us run overhead. 
         only support: 
@@ -548,7 +549,8 @@ class InlineBuilder:
                 build_dir = mod_root / prev_mod_name
                 # out_lib_meta_path = mod_root / f"{prev_mod_name}.json"
                 file_lock = mod_root / f"{prev_mod_name}.lock"
-                with portalocker.Lock(str(file_lock)) as fh:
+                # -1 is invalid for portalocker
+                with portalocker.Lock(str(file_lock), timeout=timeout) as fh:
                     mod = build_pybind([pccm_class],
                                        out_lib_path,
                                        build_dir=build_dir,
