@@ -521,15 +521,25 @@ class InlineBuilder:
                 pccm_class = InlineClass()
                 pccm_class.class_name = PCCM_INLINE_CLASS_NAME
                 pccm_class.add_func_decl(decl)
+
                 for dep in decl.code._impl_only_deps:
                     pccm_class.add_impl_only_dependency_by_name(
                         decl.meta.name, dep)
+                if isinstance(code, FunctionCode):
+                    for dep in code._impl_only_deps:
+                        pccm_class.add_impl_only_dependency_by_name(
+                            decl.meta.name, dep)
+
                 if inner_decl is not None:
                     inner_decl.meta.name = PCCM_INLINE_INNER_FUNCTION_NAME
                     pccm_class.add_func_decl(inner_decl)
                     for dep in inner_decl.code._impl_only_deps:
                         pccm_class.add_impl_only_dependency_by_name(
                             inner_decl.meta.name, dep)
+                    if isinstance(code, FunctionCode):
+                        for dep in code._impl_only_deps:
+                            pccm_class.add_impl_only_dependency_by_name(
+                                inner_decl.meta.name, dep)
 
                 pccm_class.add_dependency(*self.deps)
                 pccm_class.namespace = PCCM_INLINE_NAMESPACE

@@ -29,9 +29,12 @@ class MiddlewareMeta(object):
         self.type = mw_type
 
 
-_FCODE_ARGUMENT_ATTR_HOOKS: Dict[str,
-                                 Callable[["FunctionCode", List[Argument]],
-                                          None]] = {}
+class FuncArgAttrHandler(abc.ABC):
+    @abc.abstractmethod
+    def handle(self, code: "FunctionCode", args: List[Argument]):
+        raise NotImplementedError
+
+_FCODE_ARGUMENT_ATTR_HOOKS: Dict[str, Type[FuncArgAttrHandler]] = {}
 
 
 def register_arg_attr_hook(type_str: str):
@@ -424,6 +427,8 @@ class FunctionCode(object):
                                           Optional[str]]] = []
         self._invalid = False
 
+        self._type_to_hook: Dict[str, FuncArgAttrHandler] = {}
+
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0
 
@@ -463,6 +468,7 @@ class FunctionCode(object):
                     "you can't use class inherit from param class as"
                     " a dependency. use add_param_class instead.")
             self._impl_only_deps.append(npcls)
+        return self
 
     def add_param_class(self,
                         subnamespace: str,
@@ -476,6 +482,7 @@ class FunctionCode(object):
                 param_class.class_name)
             raise ValueError(msg)
         self._impl_only_pdeps.append((subnamespace, param_class, name_alias))
+        return self
 
     @contextlib.contextmanager
     def block(self, prefix: str, start: str = "{", end: str = "}"):
@@ -708,9 +715,14 @@ class FunctionCode(object):
                              default,
                              pyanno=pyanno,
                              attrs=arg_with_attr.attrs))
-        hook = _get_attr_hook(type)
-        if hook is not None:
-            hook(self, args)
+        if type not in self._type_to_hook:
+            hook = _get_attr_hook(type)
+            if hook is not None:
+                hook_instance = hook()
+                self._type_to_hook[type] = hook_instance
+                hook_instance.handle(self, args)
+        else:
+            self._type_to_hook[type].handle(self, args)
         self.arguments.extend(args)
         return self
 
