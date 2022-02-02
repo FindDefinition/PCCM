@@ -108,6 +108,90 @@ def arg_parser(data: str):
     res: List[NameWithAttrs] = _ARG_WITH_ATTR_PARSER.parse(data)
     return res
 
+# https://alx71hub.github.io/hcb/#function-definition
+
+_CPP_TYPE_GRAMMAR_V2 = """
+
+type_decl: decl_spec_seq decl
+decl_spec_seq: decl_spec | decl_spec decl_spec_seq
+decl_spec: type_spec |
+            func_spec
+type_spec: trailing_type_spec |
+    class_spec |
+    enum_spec
+trailing_type_spec:
+    simple_type_spec |
+    elab_type_spec |
+    typename_spec |
+    cv_qual
+simple_type_spec: ns_sep? nested_name_spec? type_name |
+    ns_sep? nested_name_spec template simple_template_id |
+    char |
+    char16_t |
+    char32_t |
+    wchar_t |
+    bool |
+    short |
+    int |
+    long |
+    signed |
+    unsigned |
+    float |
+    double |
+    void |
+    auto |
+    decl_spec
+
+
+declaractor: 
+
+decl: ptr_decl |
+      ref_decl |
+      rref_decl
+
+ptr_decl: "*" cv_qual? decl?
+
+ref_decl: "&" decl?
+
+rref_decl: "&&" decl?
+
+type: decl_seq decl?
+
+decl_seq: decl_specs (decl_specs)*
+
+decl_specs: "const" -> const
+    | "static" -> static
+    | "inline" -> inline
+    | "constexpr" -> constexpr
+    | "mutable" -> mutable
+    | "__restrict__" -> restrict
+    | base_type
+    | "::" -> ns_sep
+
+base_type: qualified_id | qualified_id "<" template_args ">"
+
+qualified_id: identifier ("::" identifier)*
+
+template_args: template_arg ("," template_arg)*
+
+template_arg: type | number
+
+cv_qual: "const" -> const
+        | "volatile" -> volatile
+
+identifier: NAME
+string : ESCAPED_STRING
+number: SIGNED_NUMBER
+
+%import common.ESCAPED_STRING
+%import common.SIGNED_NUMBER
+%import common.WS
+%import common.CNAME -> NAME
+
+%ignore WS
+"""
+
+
 # https://en.cppreference.com/w/cpp/language/declarations
 _CPP_TYPE_GRAMMAR = """
 decl: ptr_decl |
@@ -129,6 +213,7 @@ decl_specs: "const" -> const
     | "inline" -> inline
     | "constexpr" -> constexpr
     | "mutable" -> mutable
+    | "__restrict__" -> restrict
     | base_type
 
 base_type: qualified_id | qualified_id "<" template_args ">"

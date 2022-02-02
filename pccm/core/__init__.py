@@ -51,6 +51,19 @@ def _get_attr_hook(type_str: str):
     res = _FCODE_ARGUMENT_ATTR_HOOKS.get(type_str, None)
     return res
 
+def _clean_code(code: str):
+    lines = code.split("\n")
+    # filter empty lines
+    lines = list(filter(lambda x: len(x.strip()) > 0, lines))
+    if not lines:
+        return ""
+    min_indent = max(len(l) for l in lines)
+    for l in lines:
+        for i in range(len(l)):
+            if l[i] != " ":
+                min_indent = min(min_indent, i)
+                break
+    return "\n".join(l[min_indent:] for l in lines)
 
 class FunctionMeta(object):
     def __init__(self,
@@ -444,19 +457,7 @@ class FunctionCode(object):
         return self._invalid
 
     def raw(self, code: str):
-        # align code indent to zero if possible
-        lines = code.split("\n")
-        # filter empty lines
-        lines = list(filter(lambda x: len(x.strip()) > 0, lines))
-        if not lines:
-            return self
-        min_indent = max(len(l) for l in lines)
-        for l in lines:
-            for i in range(len(l)):
-                if l[i] != " ":
-                    min_indent = min(min_indent, i)
-                    break
-        self._blocks[-1].body.append("\n".join(l[min_indent:] for l in lines))
+        self._blocks[-1].body.append(_clean_code(code))
         return self
 
     def add_dependency(self, *no_param_class_cls: Type["Class"]):
@@ -1120,6 +1121,11 @@ class Class(object):
                                self.class_name)
 
     @property
+    def canonical_namespace(self):
+        assert self._namespace is not None
+        return "::".join(self._namespace.split("."))
+
+    @property
     def graph_inited(self) -> bool:
         return self._graph_inited
 
@@ -1314,12 +1320,12 @@ class Class(object):
     def add_code_before_class(self, code: str):
         """this function should only be used for macro defs.
         """
-        self._code_before_class.append(code)
+        self._code_before_class.append(_clean_code(code))
 
     def add_code_after_class(self, code: str):
         """this function should only be used for macro undefs.
         """
-        self._code_after_class.append(code)
+        self._code_after_class.append(_clean_code(code))
 
     def add_include(self, *inc_path: str):
         """can be used for empty class for external dependency.
@@ -1995,13 +2001,14 @@ class CodeGenerator(object):
 
     def code_generation(self,
                         cus: List[Union[Class, ParameterizedClass]],
-                        include_root: Optional[Path] = None):
+                        include_root: Optional[Path] = None,
+                        global_header_only: bool = False):
         header_dict = OrderedDict()  # type: Dict[str, CodeSectionHeader]
         impl_dict = OrderedDict()  # type: Dict[str, CodeSectionImpl]
         header_to_impls = OrderedDict()  # type: Dict[str, List[str]]
         for cu in cus:
             cu_header_dict, cu_impls_dict = self.generate_cu_code_v2(
-                cu, include_root=include_root)
+                cu, include_root=include_root, global_header_only=global_header_only)
             header_key = list(cu_header_dict.keys())[0]
             header_to_impls[header_key] = list(cu_impls_dict.keys())
             header_dict.update(cu_header_dict)
@@ -2032,7 +2039,7 @@ class CodeGenerator(object):
                     code_old_lines = code.strip().split("\n")
                     diff = difflib.unified_diff(code_old_lines,
                                                 code_to_write_lines)
-                    print(f"---{code_path}---")
+                    print(f"--- {code_path} ---")
                     print("\n".join(diff))
             code_path.parent.mkdir(exist_ok=True, parents=True)
             with code_path.open("w") as f:
@@ -2043,13 +2050,15 @@ class CodeGenerator(object):
     def generate_cu_code_v2(self,
                             cu: Class,
                             one_impl_one_file: bool = True,
-                            include_root: Optional[Path] = None):
+                            include_root: Optional[Path] = None,
+                            global_header_only: bool = False):
         """
         TODO multiple impl one file
         generate_code will put all Class in cus to one header file and same namespace.
         headers: {
             "xx.yy.zz": content
         }
+        global_header_only is used for CUDA nvrtc.
         """
         impl_dict = OrderedDict()  # type: Dict[str, CodeSectionImpl]
         code_cdefs = []  # type: List[CodeSectionClassDef]
@@ -2081,7 +2090,7 @@ class CodeGenerator(object):
             if not isinstance(meta, (ConstructorMeta, DestructorMeta)):
                 assert func_name != cu_name
             # if isinstance(meta, MemberFunctionMeta):
-            header_only = meta.is_header_only() or code_obj.is_template()
+            header_only = meta.is_header_only() or code_obj.is_template() or global_header_only
             impl_file_name = meta.impl_loc
             if not impl_file_name:
                 if isinstance(meta, DestructorMeta):

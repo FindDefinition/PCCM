@@ -36,6 +36,9 @@ class CudaExternalFunctionMeta(ExternalFunctionMeta):
     def is_header_only(self):
         return self.inline or "__forceinline__" in self.attrs
 
+class CudaGlobalFunctionMeta(CudaExternalFunctionMeta):
+    pass
+
 
 def cuda_global_function(func=None,
                          inline: bool = False,
@@ -52,15 +55,16 @@ def cuda_global_function(func=None,
     if launch_bounds is not None:
         cuda_global_attrs.append("__launch_bounds__({}, {})".format(
             launch_bounds[0], launch_bounds[1]))
-    return markers.external_function(func,
-                                     name=name,
-                                     inline=inline,
-                                     constexpr=False,
-                                     macro_guard=macro_guard,
-                                     impl_loc=impl_loc,
-                                     impl_file_suffix=impl_file_suffix,
-                                     attrs=cuda_global_attrs,
-                                     header_only=header_only)
+    return external_function(func,
+                            name=name,
+                            inline=inline,
+                            constexpr=False,
+                            macro_guard=macro_guard,
+                            impl_loc=impl_loc,
+                            impl_file_suffix=impl_file_suffix,
+                            attrs=cuda_global_attrs,
+                            header_only=header_only,
+                            is_global=True)
 
 
 def member_function(func=None,
@@ -149,6 +153,7 @@ def external_function(func=None,
                       impl_loc: str = "",
                       impl_file_suffix: str = ".cu",
                       header_only: Optional[bool] = None,
+                      is_global: bool = False,
                       name=None):
     if forceinline or inline:
         assert forceinline is not inline, "can't set both inline and forceinline"
@@ -162,14 +167,17 @@ def external_function(func=None,
     if attrs is None:
         attrs = []
     attrs.extend(cuda_global_attrs)
-    meta = CudaExternalFunctionMeta(name=name,
-                                    inline=inline,
-                                    constexpr=constexpr,
-                                    attrs=attrs,
-                                    macro_guard=macro_guard,
-                                    impl_loc=impl_loc,
-                                    impl_file_suffix=impl_file_suffix,
-                                    header_only=header_only)
+    meta_cls = CudaExternalFunctionMeta
+    if is_global:
+        meta_cls = CudaGlobalFunctionMeta
+    meta = meta_cls(name=name,
+                    inline=inline,
+                    constexpr=constexpr,
+                    attrs=attrs,
+                    macro_guard=macro_guard,
+                    impl_loc=impl_loc,
+                    impl_file_suffix=impl_file_suffix,
+                    header_only=header_only)
     return markers.meta_decorator(func, meta)
 
 

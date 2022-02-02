@@ -196,18 +196,22 @@ class TemplateTypeStmt(object):
                  args: List["TemplateTypeStmt"],
                  not_template: bool,
                  invalid: bool = False,
-                 exist_anno: str = ""):
+                 exist_anno: str = "",
+                 is_ptr: bool = False):
         self.name = name
         self.args = args
         self.not_template = not_template
         self.invalid = invalid
         self.exist_anno = exist_anno
+        self.is_ptr = is_ptr
 
     def to_pyanno(self) -> str:
         if self.invalid:
             return "Any"
         if self.exist_anno:
             return self.exist_anno
+        if self.is_ptr:
+            return "Any"
         if self.name in self.NameToHandler:
             pyanno_generic = self.NameToHandler[self.name](self.args)
         else:
@@ -215,22 +219,38 @@ class TemplateTypeStmt(object):
         return pyanno_generic
 
 
+_LEN_RESTRICT = len("__restrict__")
+
 def _simple_template_type_parser_recursive(
         stmt: str, begin: int, end: int, bracket_pair: Dict[int, int],
         exist_annos: Dict[str, str]) -> TemplateTypeStmt:
+    # remove const
+    if stmt[:5] == "const" and stmt[5] == " ":
+        begin += 5
+    # remove tailing const, pointer and ref
+    is_ptr = False 
+    if stmt.endswith("__restrict__"):
+        end -= _LEN_RESTRICT
+        stmt = stmt[:end].strip()
+    if stmt[-1] == "*":
+        is_ptr = True 
+        end -= 1
+    elif stmt[-1] == "&":
+        end -= 1
+    stmt = stmt[:end].strip()
     if stmt[end - 1] != ">":
         # type with no template param
         name = stmt[begin:end].strip()
         if name in exist_annos:
-            return TemplateTypeStmt("", [], True, exist_anno=exist_annos[name])
-        return TemplateTypeStmt(name, [], True)
+            return TemplateTypeStmt("", [], True, exist_anno=exist_annos[name], is_ptr=is_ptr)
+        return TemplateTypeStmt(name, [], True, is_ptr=is_ptr)
     left = stmt.find("<", begin, end)
 
     if left == -1:
         raise ValueError("invalid")
     name = stmt[begin:left].strip()
     if name in exist_annos:
-        return TemplateTypeStmt("", [], True, exist_anno=exist_annos[name])
+        return TemplateTypeStmt("", [], True, exist_anno=exist_annos[name], is_ptr=is_ptr)
     template_arg_ranges = []  # type: List[Tuple[int, int]]
     pos = left + 1
     arg_range_start = left + 1
@@ -250,7 +270,7 @@ def _simple_template_type_parser_recursive(
                                                exist_annos)
         for b, e in template_arg_ranges
     ]
-    return TemplateTypeStmt(name, args, False)
+    return TemplateTypeStmt(name, args, False, is_ptr=is_ptr)
 
 
 def _simple_template_type_parser(
@@ -1207,7 +1227,9 @@ if __name__ == "__main__":
     print(python_anno_parser("Dict[int, List[int]]"))
     # python_anno_parser("Tuple[Tuple[spconv.Tensor, int], float]")
     print(
-        _simple_template_type_parser("std::vector<std::tuple<int, ArrayPtr>>",
+        _simple_template_type_parser("std::vector<std::tuple<int, ArrayPtr>>*",
                                      {
                                          "ArrayPtr": "ArrayPtr"
                                      }).to_pyanno())
+    print(
+        _simple_template_type_parser("float*", {}).is_ptr)
