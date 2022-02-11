@@ -231,13 +231,21 @@ def _simple_template_type_parser_recursive(
     is_ptr = False 
     if stmt.endswith("__restrict__"):
         end -= _LEN_RESTRICT
-        stmt = stmt[:end].strip()
+        stmt = stmt[:end]
+        stmt2 = stmt.strip()
+        end -= len(stmt) - len(stmt2)
+        stmt = stmt2
     if stmt[-1] == "*":
         is_ptr = True 
         end -= 1
     elif stmt[-1] == "&":
         end -= 1
-    stmt = stmt[:end].strip()
+
+    stmt = stmt[:end]
+    stmt2 = stmt.strip()
+    end -= len(stmt) - len(stmt2)
+    stmt = stmt2
+
     if stmt[end - 1] != ">":
         # type with no template param
         name = stmt[begin:end].strip()

@@ -366,6 +366,28 @@ class InlineBuilder:
         
         return None 
 
+    def build(self, pccm_cls: pccm.Class, mod_root: Path, name: str, timeout: float):
+        out_lib_path = mod_root / name
+        build_dir = mod_root / name
+        # out_lib_meta_path = mod_root / f"{prev_mod_name}.json"
+        file_lock = mod_root / f"{name}.lock"
+        # -1 is invalid for portalocker
+        with portalocker.Lock(str(file_lock), timeout=timeout) as fh:
+            mod = build_pybind([pccm_cls],
+                                out_lib_path,
+                                build_dir=build_dir,
+                                **self.build_kwargs)
+
+        return getattr(
+            getattr(getattr(mod, PCCM_INLINE_NAMESPACE),
+                    PCCM_INLINE_CLASS_NAME), PCCM_INLINE_FUNCTION_NAME)
+
+    def run_func(self, func, *args, user_args: Optional[Any] = None):
+        return func(*args)
+
+    def get_base_class(self):
+        return InlineClass()
+
     def inline(self,
                name: str,
                code: Union[str, FunctionCode],
@@ -506,19 +528,20 @@ class InlineBuilder:
                 assert inner_code_str is not None
                 if isinstance(code, FunctionCode):
                     container_fcode.ret(code.return_type)
-                self.handle_container_code(inner_code_str, container_fcode, user_arg)
+                meta = self.handle_container_code(inner_code_str, container_fcode, user_arg)
                 inner_decl = self.create_inner_decl(inner_code_str, container_fcode, inner_fcode, user_arg)
 
                 # now we have complete code. we need to determine a history build dir and use it to build library if need.
                 # here we must reserve build dir because we need to rebuild when dependency change.
-                meta = StaticMemberFunctionMeta(impl_file_suffix=impl_file_suffix)
-                meta.mw_metas.append(Pybind11MethodMeta())
+                if meta is None:
+                    meta = StaticMemberFunctionMeta(impl_file_suffix=impl_file_suffix)
+                    meta.mw_metas.append(Pybind11MethodMeta())
                 decl = FunctionDecl(meta, container_fcode)
                 decl.meta.name = PCCM_INLINE_FUNCTION_NAME
                 # container_fcode_str = decl.inspect_impl()
                 # container_fcode_hash = hashlib.sha256(code_str.encode('utf-8')).hexdigest()
 
-                pccm_class = InlineClass()
+                pccm_class = self.get_base_class()
                 pccm_class.class_name = PCCM_INLINE_CLASS_NAME
                 pccm_class.add_func_decl(decl)
 
@@ -543,37 +566,12 @@ class InlineBuilder:
 
                 pccm_class.add_dependency(*self.deps)
                 pccm_class.namespace = PCCM_INLINE_NAMESPACE
-                # name format: code_hash + line + pid
-                # if name == "":
-                #     prev_mod_name = self._find_exist_module_name(container_fcode_str, container_fcode_hash, mod_root)
-                # else:
-                # to avoid multi-process problem, we need to
-                prev_mod_name = name
-                # if prev_mod_name is None:
-                #     prev_mod_name = f"_{container_fcode_hash}_{lineno}_{os.getpid()}"
-                #     out_lib_meta_path = mod_root / f"{prev_mod_name}.json"
-                #     meta = ModuleMetaData(container_fcode_str, self.dep_ids)
-                #     with out_lib_meta_path.open("w") as f:
-                #         json.dump(dataclasses.asdict(meta), f)
-                out_lib_path = mod_root / prev_mod_name
-                build_dir = mod_root / prev_mod_name
-                # out_lib_meta_path = mod_root / f"{prev_mod_name}.json"
-                file_lock = mod_root / f"{prev_mod_name}.lock"
-                # -1 is invalid for portalocker
-                with portalocker.Lock(str(file_lock), timeout=timeout) as fh:
-                    mod = build_pybind([pccm_class],
-                                       out_lib_path,
-                                       build_dir=build_dir,
-                                       **self.build_kwargs)
-
-                self.module_functions[unique_key] = getattr(
-                    getattr(getattr(mod, PCCM_INLINE_NAMESPACE),
-                            PCCM_INLINE_CLASS_NAME), PCCM_INLINE_FUNCTION_NAME)
+                self.module_functions[unique_key] = self.build(pccm_class, mod_root, name, timeout)
                 self.cached_captures[unique_key] = all_captures
                 self.cached_capture_ctypes[unique_key] = capture_bts
                 self.used_names.add(key)
                 # breakpoint()
-                return self.module_functions[unique_key](*args)
+                return self.run_func(self.module_functions[unique_key], *args, user_args=user_arg)
 
         # module already loaded. just run it after transform.
         func = self.module_functions[unique_key]
@@ -598,7 +596,7 @@ class InlineBuilder:
             args.append(obj)
         for v in additional_vars.values():
             args.append(v)
-        return func(*args)
+        return self.run_func(func, *args, user_args=user_arg)
 
 
 def main():
