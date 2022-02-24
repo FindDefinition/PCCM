@@ -955,13 +955,14 @@ class Pybind11SingleClassHandler(ManualClass):
         assert cu.namespace is not None
         if mw_meta.raw_bind_anno:
             self.raw_bind_annos.append(mw_meta.raw_bind_anno)
-        self.func_decls.append(
-            PybindMethodDecl(func_decl, cu.namespace, cu.class_name, mw_meta))
+        decl = PybindMethodDecl(func_decl, cu.namespace, cu.class_name, mw_meta)
+        if not mw_meta.prop_name:
+            mw_meta.prop_name = decl.func_name
+        self.func_decls.append(decl)
 
     def handle_member(self, cu: Class, member_decl: Member,
                       mw_meta: Pybind11PropMeta):
         assert cu.namespace is not None
-
         self.prop_decls.append(
             PybindPropDecl(member_decl, cu.namespace, cu.class_name, mw_meta))
 

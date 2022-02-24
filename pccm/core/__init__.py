@@ -18,7 +18,7 @@ from pccm.core.funccode import (Argument, TemplateNonTypeArgument,
                                 TemplateTypeArgument)
 from pccm.core.parsers import arg_parser
 from pccm.utils import get_qualname_of_type
-
+from pccm.core.inspecttools import get_members
 _HEADER_ONLY_PRE_ATTRS = set(["static", "virtual", "friend"])  # type: Set[str]
 _HEADER_ONLY_POST_ATTRS = set(["final", "override",
                                "noexcept"])  # type: Set[str]
@@ -1106,6 +1106,9 @@ class Class(object):
     def class_name(self, value: str):
         self._user_provided_class_name = value
 
+    def get_user_provided_class_name(self):
+        return self._user_provided_class_name
+
     @property
     def namespace(self) -> Optional[str]:
         return self._namespace
@@ -1495,32 +1498,6 @@ class Class(object):
             if not is_impl_only:
                 res.append(dep)
         return res
-
-    def get_members(self, no_parent: bool = True):
-        """this function return member functions that keep def order.
-        """
-        this_cls = type(self)
-        if not no_parent:
-            res = inspect.getmembers(this_cls, inspect.isfunction)
-            # inspect.getsourcelines need to read file, so .__code__.co_firstlineno
-            # is greatly faster than it.
-            # res.sort(key=lambda x: inspect.getsourcelines(x[1])[1])
-            res.sort(key=lambda x: x[1].__code__.co_firstlineno)
-            return res
-        parents = inspect.getmro(this_cls)[1:]
-        parents_methods = set()
-        for parent in parents:
-            members = inspect.getmembers(parent, predicate=inspect.isfunction)
-            parents_methods.update(members)
-
-        child_methods = set(
-            inspect.getmembers(this_cls, predicate=inspect.isfunction))
-        child_only_methods = child_methods - parents_methods
-        res = list(child_only_methods)
-        # res.sort(key=lambda x: inspect.getsourcelines(x[1])[1])
-        res.sort(key=lambda x: x[1].__code__.co_firstlineno)
-        return res
-
 
 class CodeSection(abc.ABC):
     # @abc.abstractmethod
@@ -1967,7 +1944,7 @@ class CodeGenerator(object):
     def cached_get_cu_members(self, cu: Class):
         cu_type = type(cu)
         if cu_type not in self._get_members_cache:
-            self._get_members_cache[cu_type] = cu.get_members()
+            self._get_members_cache[cu_type] = get_members(cu)
         return self._get_members_cache[cu_type]
 
     def cached_extract_classunit_methods(self, cu: Class):
@@ -2209,3 +2186,21 @@ class CodeGenerator(object):
         header_dict = {cu.include_file: code_header}
         # every cu have only one header with several impl files.
         return header_dict, impl_dict
+
+
+def extract_classunit_methods_external(obj: Any):
+    methods = []  # type: List[FunctionDecl]
+    for k, v in get_members(obj):
+        if hasattr(v, PCCM_FUNC_META_KEY):
+            meta = getattr(v, PCCM_FUNC_META_KEY)  # type: FunctionMeta
+            code_obj = getattr(obj, k)()  # type: FunctionCode
+            if not isinstance(code_obj, FunctionCode):
+                msg = "your func {} must return a FunctionCode".format(
+                    v.__name__)
+                raise ValueError(msg)
+            if code_obj.is_invalid():
+                continue
+            func_doc = inspect.getdoc(v)
+            code_obj.func_doc = func_doc
+            methods.append(FunctionDecl(meta, code_obj))
+    return methods

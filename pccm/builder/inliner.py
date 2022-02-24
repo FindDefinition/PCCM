@@ -324,8 +324,12 @@ class InlineBuilder:
             plugins: Optional[Dict[str, InlineBuilderPlugin]] = None,
             root: Optional[Path] = None,
             build_root: Optional[Path] = None,
-            build_kwargs: Optional[Dict[str, Any]] = None) -> None:
+            build_kwargs: Optional[Dict[str, Any]] = None,
+            param_deps: Optional[List[pccm.ParameterizedClass]] = None) -> None:
         self.deps = deps
+        if param_deps is None:
+            param_deps = []
+        self.param_deps = param_deps
         if plugins is None:
             self.plugins = _DEFAULT_PLUGINS
         else:
@@ -366,7 +370,7 @@ class InlineBuilder:
         
         return None 
 
-    def build(self, pccm_cls: pccm.Class, mod_root: Path, name: str, timeout: float):
+    def build(self, pccm_cls: pccm.Class, mod_root: Path, name: str, timeout: float, user_arg: Optional[Any] = None):
         out_lib_path = mod_root / name
         build_dir = mod_root / name
         # out_lib_meta_path = mod_root / f"{prev_mod_name}.json"
@@ -421,7 +425,7 @@ class InlineBuilder:
         local_vars = cur_frame.f_locals.copy()
         local_vars.update(additional_vars)
         code_path = cur_frame.f_code.co_filename
-        lineno = cur_frame.f_code.co_firstlineno
+        lineno = cur_frame.f_lineno
         key = (code_path, name)
         unique_key = (code_path, name, lineno)
 
@@ -489,8 +493,12 @@ class InlineBuilder:
                         # eval expr in prev frame
                         obj = eval(cap.name, local_vars)
                     # apply non-anonymous vars (expr are anonymous vars)
-                    cpp_type, mapped_cpp_type = nested_type_analysis(
-                        obj, self.plugins, user_arg=user_arg)
+                    try:
+                        cpp_type, mapped_cpp_type = nested_type_analysis(
+                            obj, self.plugins, user_arg=user_arg)
+                    except:
+                        print(f"ERROR: variable {cap.name} type analysis failed.")
+                        raise
                     obj = _nested_apply_plugin_transform(
                         cpp_type, obj, self.plugins, user_arg)
                     if cap.is_expr:
@@ -565,8 +573,15 @@ class InlineBuilder:
                                 inner_decl.meta.name, dep)
 
                 pccm_class.add_dependency(*self.deps)
+                for pdep in self.param_deps:
+                    pdep_ns = pdep.namespace
+                    pdep_cls_name = pdep.get_user_provided_class_name()
+                    assert pdep_ns is not None, "you must provide a namespace for param dep"
+                    assert pdep_cls_name is not None, "you must provide a class_name for param dep"
+                    # use user-defined class name as alias
+                    pccm_class.add_param_class(pdep_cls_name, pdep, pdep_cls_name)
                 pccm_class.namespace = PCCM_INLINE_NAMESPACE
-                self.module_functions[unique_key] = self.build(pccm_class, mod_root, name, timeout)
+                self.module_functions[unique_key] = self.build(pccm_class, mod_root, name, timeout, user_arg)
                 self.cached_captures[unique_key] = all_captures
                 self.cached_capture_ctypes[unique_key] = capture_bts
                 self.used_names.add(key)
