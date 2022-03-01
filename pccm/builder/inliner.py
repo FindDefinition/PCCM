@@ -192,7 +192,7 @@ class CaptureStmt:
 
 def get_save_root(path: Path, root: Optional[Path] = None, build_root: Optional[Path] = None):
     if root is not None:
-        relative_parts = path.parent.relative_to(root)
+        relative_parts = path.resolve().parent.relative_to(root)
         import_parts = list(relative_parts.parts)
     else:
         import_parts = loader.try_capture_import_parts(path)
@@ -371,6 +371,7 @@ class InlineBuilder:
         return None 
 
     def build(self, pccm_cls: pccm.Class, mod_root: Path, name: str, timeout: float, user_arg: Optional[Any] = None):
+        mod_root.mkdir(mode=0o755, parents=True, exist_ok=True)
         out_lib_path = mod_root / name
         build_dir = mod_root / name
         # out_lib_meta_path = mod_root / f"{prev_mod_name}.json"
@@ -435,8 +436,6 @@ class InlineBuilder:
             if key in self.used_names and not exist:
                 raise ValueError("you use duplicate name in same file.")
             if not exist:
-                mod_root = get_save_root(Path(code_path), self.root, self.build_root)
-                mod_root.mkdir(mode=0o755, parents=True, exist_ok=True)
                 # 1. extract captured vars
                 it = source_iter.CppSourceIterator(code_str)
                 # hold ranges for further replace
@@ -581,6 +580,7 @@ class InlineBuilder:
                     # use user-defined class name as alias
                     pccm_class.add_param_class(pdep_cls_name, pdep, pdep_cls_name)
                 pccm_class.namespace = PCCM_INLINE_NAMESPACE
+                mod_root = get_save_root(Path(code_path), self.root, self.build_root)
                 self.module_functions[unique_key] = self.build(pccm_class, mod_root, name, timeout, user_arg)
                 self.cached_captures[unique_key] = all_captures
                 self.cached_capture_ctypes[unique_key] = capture_bts
