@@ -175,6 +175,9 @@ class TemplateTypeStmt(object):
         "std::tuple":
         lambda args: "Tuple[{}]".format(", ".join(a.to_pyanno()
                                                   for a in args)),
+        "std::pair":
+        lambda args: "Tuple[{}]".format(", ".join(a.to_pyanno()
+                                                  for a in args)),
         "std::vector":
         lambda args: "List[{}]".format(args[0].to_pyanno()),
         "std::list":

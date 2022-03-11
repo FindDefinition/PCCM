@@ -190,22 +190,6 @@ class CaptureStmt:
         self.arg_name = name
 
 
-def get_save_root(path: Path, root: Optional[Path] = None, build_root: Optional[Path] = None):
-    if root is not None:
-        relative_parts = path.resolve().parent.relative_to(root)
-        import_parts = list(relative_parts.parts)
-    else:
-        import_parts = loader.try_capture_import_parts(path)
-    if import_parts is None:
-        raise NotImplementedError("you must use inline "
-                                  "in a standard python project with "
-                                  "pip installed.")
-    if build_root is not None:
-        res = build_root / "/".join(import_parts)
-    else:
-        res = PCCM_INLINE_LIBRARY_PATH / "/".join(import_parts)
-    return res
-
 
 def get_save_file(path: Path):
     pid = os.getpid()
@@ -361,6 +345,23 @@ class InlineBuilder:
                 return path.stem
         return None
 
+    def get_save_root(self, path: Path, root: Optional[Path] = None, build_root: Optional[Path] = None):
+        if root is not None:
+            relative_parts = path.resolve().parent.relative_to(root)
+            import_parts = list(relative_parts.parts)
+        else:
+            import_parts = loader.try_capture_import_parts(path)
+        if import_parts is None:
+            raise NotImplementedError("you must use inline "
+                                    "in a standard python project with "
+                                    "pip installed.")
+        if build_root is not None:
+            res = build_root / "/".join(import_parts)
+        else:
+            res = PCCM_INLINE_LIBRARY_PATH / "/".join(import_parts)
+        return res
+
+
     def handle_container_code(self, code_str: str, code: FunctionCode,
                     arg: Optional[Any]):
         code.raw(code_str)
@@ -401,7 +402,8 @@ class InlineBuilder:
                *,
                _frame_cnt: int = 1,
                user_arg: Optional[Any] = None,
-               timeout: float=999999.0):
+               timeout: float=999999.0,
+               disable_cache: bool = False):
         """use $var to capture python objects, use $(var.shape[0]) to capture anonymous expr.
         ~20-100us run overhead. 
         only support: 
@@ -429,12 +431,14 @@ class InlineBuilder:
         lineno = cur_frame.f_lineno
         key = (code_path, name)
         unique_key = (code_path, name, lineno)
-
         del cur_frame
         with self.lock:
-            exist = unique_key in self.module_functions
-            if key in self.used_names and not exist:
-                raise ValueError("you use duplicate name in same file.")
+            if not disable_cache:
+                exist = unique_key in self.module_functions
+                if key in self.used_names and not exist:
+                    raise ValueError("you use duplicate name in same file.")
+            else:
+                exist = False
             if not exist:
                 # 1. extract captured vars
                 it = source_iter.CppSourceIterator(code_str)
@@ -580,13 +584,15 @@ class InlineBuilder:
                     # use user-defined class name as alias
                     pccm_class.add_param_class(pdep_cls_name, pdep, pdep_cls_name)
                 pccm_class.namespace = PCCM_INLINE_NAMESPACE
-                mod_root = get_save_root(Path(code_path), self.root, self.build_root)
-                self.module_functions[unique_key] = self.build(pccm_class, mod_root, name, timeout, user_arg)
-                self.cached_captures[unique_key] = all_captures
-                self.cached_capture_ctypes[unique_key] = capture_bts
-                self.used_names.add(key)
-                # breakpoint()
-                return self.run_func(self.module_functions[unique_key], *args, user_args=user_arg)
+                mod_root = self.get_save_root(Path(code_path), self.root, self.build_root)
+                func = self.build(pccm_class, mod_root, name, timeout, user_arg)
+                if not disable_cache:
+                    self.module_functions[unique_key] = func
+                    self.cached_captures[unique_key] = all_captures
+                    self.cached_capture_ctypes[unique_key] = capture_bts
+                    self.used_names.add(key)
+                    # breakpoint()
+                return self.run_func(func, *args, user_args=user_arg)
 
         # module already loaded. just run it after transform.
         func = self.module_functions[unique_key]

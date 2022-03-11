@@ -3,6 +3,7 @@ import contextlib
 import difflib
 import functools
 import inspect
+import re
 import types
 from collections import OrderedDict, defaultdict, deque
 from pathlib import Path
@@ -64,6 +65,65 @@ def _clean_code(code: str):
                 min_indent = min(min_indent, i)
                 break
     return "\n".join(l[min_indent:] for l in lines)
+
+_CPP_OPERATOR_ENC = {
+    "+": "add",
+    "-": "sub",
+    "*": "mul",
+    "/": "div",
+    "%": "mod",
+    "^": "xor",
+    "&": "and",
+    "|": "or",
+    "~": "inv",
+    "!": "not",
+    "=": "eq",
+    "<": "st",
+    ">": "lt",
+    "+=": "iadd",
+    "-=": "isub",
+    "*=": "imul",
+    "/=": "idiv",
+    "%=": "imod",
+    "^=": "ixor",
+    "&=": "iand",
+    "|=": "ior",
+    "<<": "lshift",
+    ">>": "rshift",
+    "<<=": "ilshift",
+    ">>=": "irshift",
+    "==": "eq",
+    "!=": "ne",
+    "<=": "le",
+    ">=": "ge",
+    "<=>": "three_way_comp",
+    "&&": "logical_and",
+    "||": "logical_or",
+    "++": "inc",
+    "--": "dec",
+    ",": "comma",
+    "->*": "pointer_to_member2",
+    "->": "pointer_to_member",
+}
+
+_IDENTIFIER_RE = re.compile("[_a-zA-Z][_a-zA-Z0-9]*")
+
+def _cpp_operator_name_conversion(name: str):
+    name = name.strip()
+    if _IDENTIFIER_RE.fullmatch(name) is None:
+        if name.startswith("operator"):
+            if "[" in name:
+                return "operator_index"
+            elif "(" in name:
+                return "operator_call"
+            parts = name.split(" ")
+            if len(parts) == 1:
+                return "pccm_" + name[:8] + "_" + _CPP_OPERATOR_ENC[name[8:]]
+            else:
+                return "pccm_" + parts[0] + "_" + _CPP_OPERATOR_ENC[parts[1]]
+        raise NotImplementedError
+    return name 
+
 
 class FunctionMeta(object):
     def __init__(self,
@@ -2064,16 +2124,20 @@ class CodeGenerator(object):
                 func_name = cu_name
             elif isinstance(meta, DestructorMeta):
                 func_name = "~" + cu_name
+            func_name_for_file = func_name
             if not isinstance(meta, (ConstructorMeta, DestructorMeta)):
                 assert func_name != cu_name
+                assert func_name is not None 
+                func_name_for_file = _cpp_operator_name_conversion(func_name)
+
             # if isinstance(meta, MemberFunctionMeta):
             header_only = meta.is_header_only() or code_obj.is_template() or global_header_only
             impl_file_name = meta.impl_loc
             if not impl_file_name:
                 if isinstance(meta, DestructorMeta):
-                    impl_file_name = "{}_dtor_{}".format(cu_name, func_name)
+                    impl_file_name = "{}_dtor_{}".format(cu_name, func_name_for_file)
                 else:
-                    impl_file_name = "{}_{}".format(cu_name, func_name)
+                    impl_file_name = "{}_{}".format(cu_name, func_name_for_file)
             impl_file_name = "{}/{}/{}{}".format(
                 cu.namespace.replace(".", "/"), cu.class_name, impl_file_name,
                 meta.impl_file_suffix)
