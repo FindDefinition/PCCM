@@ -67,8 +67,9 @@ def build_pybind(cus: List[Class],
                            header] = [SRC_ROOT / p for p in impls]
             pch_to_include[HEADER_ROOT / header] = header
     includes.append(HEADER_ROOT)
-    extern_build_meta = BuildMeta(includes, libpaths, libraries,
+    extern_build_meta = BuildMeta([], libpaths, libraries,
                                   additional_cflags, additional_lflags)
+    extern_build_meta.add_global_includes(*includes)
     for cu in user_cus:
         extern_build_meta += cu.build_meta
     for cu in pb.get_code_units():
@@ -120,7 +121,7 @@ def build_pybind(cus: List[Class],
     return ccimport.ccimport(
         paths,
         out_path,
-        extern_build_meta.includes,
+        extern_build_meta.include_node.global_incs,
         extern_build_meta.libpaths,
         extern_build_meta.libraries,
         compile_options,
@@ -129,7 +130,7 @@ def build_pybind(cus: List[Class],
         source_paths_for_hash=None,
         disable_hash=disable_hash,
         load_library=load_library,
-        additional_cflags=extern_build_meta.compiler_to_cflags,
+        additional_cflags=extern_build_meta.cflags_node.global_flags,
         additional_lflags=extern_build_meta.compiler_to_ldflags,
         msvc_deps_prefix=msvc_deps_prefix,
         build_dir=build_dir,

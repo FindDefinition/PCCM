@@ -977,7 +977,7 @@ class Pybind11SingleClassHandler(ManualClass):
         bind_code.arg("module", "const pybind11::module_&")
         func_meta = StaticMemberFunctionMeta(impl_file_suffix=self.file_suffix)
         parent_name = "" if not parent_is_pybind else self.cu.get_parent_name()
-        cu_type = type( self.cu)
+        cu_type = type(self.cu)
         cls_meta=  get_class_meta(cu_type)
         module_local = False 
         if cls_meta is not None:
