@@ -175,6 +175,9 @@ class TemplateTypeStmt(object):
         "std::tuple":
         lambda args: "Tuple[{}]".format(", ".join(a.to_pyanno()
                                                   for a in args)),
+        "std::pair":
+        lambda args: "Tuple[{}]".format(", ".join(a.to_pyanno()
+                                                  for a in args)),
         "std::vector":
         lambda args: "List[{}]".format(args[0].to_pyanno()),
         "std::list":
@@ -189,6 +192,10 @@ class TemplateTypeStmt(object):
         lambda args: "Set[{}]".format(args[0].to_pyanno()),
         "std::unordered_set":
         lambda args: "Set[{}]".format(args[0].to_pyanno()),
+        "std::shared_ptr":
+        lambda args: args[0].to_pyanno(),
+        "std::unique_ptr":
+        lambda args: args[0].to_pyanno(),
     }  # type: Dict[str, Callable[[List["TemplateTypeStmt"]], str]]
 
     def __init__(self,
@@ -332,8 +339,9 @@ class Pybind11Meta(MiddlewareMeta):
     pass
 
 class Pybind11ClassMeta:
-    def __init__(self, module_local: bool = False):
+    def __init__(self, module_local: bool = False, is_shared_class: bool = False):
         self.module_local = module_local
+        self.is_shared_class = is_shared_class
 
 class ReturnPolicy(Enum):
     TakeOwnerShip = "pybind11::return_value_policy::take_ownership"
@@ -387,7 +395,7 @@ class Pybind11PropMeta(Pybind11Meta):
 class Pybind11ClassMwMeta(Pybind11Meta):
     """may add some attributes in future.
     """
-    def __init__(self, raw_code: FunctionCode):
+    def __init__(self, raw_code: Optional[FunctionCode] = None):
         super().__init__(Pybind11SplitImpl)
         self.raw_code = raw_code
 
@@ -582,7 +590,8 @@ def _postprocess_class(cls_name: str,
                        enum_classes: List[EnumClass],
                        parent_ns: str = "",
                        module_local: bool = False,
-                       raw_defs: Optional[List[FunctionCode]] = None):
+                       raw_defs: Optional[List[FunctionCode]] = None,
+                       is_shared_class: bool = False):
     has_virtual = False
     if raw_defs is None:
         raw_defs = []
@@ -646,6 +655,8 @@ def _postprocess_class(cls_name: str,
             break
     cls_qual_name = "{}::{}".format(cls_namespace.replace(".", "::"), cls_name)
     cls_def_arguments = [cls_qual_name]
+    if is_shared_class:
+        cls_def_arguments.append(f"std::shared_ptr<{cls_qual_name}>")
     if has_virtual:
         cls_def_arguments.append("{}::{}".format(
             cls_namespace.replace(".", "::"), virtual_cls_name))
@@ -968,7 +979,8 @@ class Pybind11SingleClassHandler(ManualClass):
 
     def handle_class_meta(self, cu: Class, mw_meta: Pybind11ClassMwMeta):
         assert cu.namespace is not None
-        self.raw_defs.append(mw_meta.raw_code)
+        if mw_meta.raw_code is not None:
+            self.raw_defs.append(mw_meta.raw_code)
 
     def postprocess(self, parent_is_pybind: bool = False):
         if self.built:
@@ -980,17 +992,20 @@ class Pybind11SingleClassHandler(ManualClass):
         cu_type = type(self.cu)
         cls_meta=  get_class_meta(cu_type)
         module_local = False 
+        shared_ptr_class = False
         if cls_meta is not None:
             for mw_meta in cls_meta.mw_metas:
                 if isinstance(mw_meta, Pybind11ClassMeta):
                     module_local = mw_meta.module_local
+                    shared_ptr_class = mw_meta.is_shared_class
         cls_def_block, vblock = _postprocess_class(self.cu.class_name,
                                                    self.cu.namespace, "module",
                                                    self.get_pybind_decls(),
                                                    self.cu._enum_classes,
                                                    parent_name,
                                                    module_local,
-                                                   self.raw_defs)
+                                                   self.raw_defs,
+                                                   shared_ptr_class)
         func_meta.name = self.bind_func_name
         if vblock is not None:
             bind_code.code_after_include = "\n".join(
@@ -1023,6 +1038,7 @@ class Pybind11SplitMain(ParameterizedClass):
         self.add_include("pybind11/stl.h")
         self.add_include("pybind11/pybind11.h")
         self.add_include("pybind11/numpy.h")
+        self.add_include("memory")
         self.file_suffix = file_suffix
         self.built = False
 
@@ -1229,6 +1245,10 @@ def mark_prop_setter(func=None,
 
 def bind_class_module_local(cls=None):
     meta = Pybind11ClassMeta(True)
+    return append_class_mw_meta(cls, [meta])
+
+def bind_class_options(cls=None, module_local: bool = False, shared_ptr: bool = False):
+    meta = Pybind11ClassMeta(module_local, shared_ptr)
     return append_class_mw_meta(cls, [meta])
 
 if __name__ == "__main__":
