@@ -9,8 +9,8 @@ from pccm.core import (Class, CodeSectionClassDef, ConstructorMeta, EnumClass,
                        ExternalFunctionMeta, FunctionCode, FunctionDecl,
                        ManualClass, ManualClassGenerator, Member,
                        MemberFunctionMeta, MiddlewareMeta, ParameterizedClass,
-                       StaticMemberFunctionMeta, get_class_meta)
-from pccm.core.buildmeta import _unique_list_keep_order
+                       StaticMemberFunctionMeta, UnifiedDependency, get_class_meta)
+from ccimport.buildmeta import _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 from pccm.core.markers import middleware_decorator, append_class_mw_meta
 
@@ -1174,7 +1174,7 @@ class Pybind11SplitImpl(ManualClassGenerator):
         bind_cu.class_name = "PyBind" + cu.class_name
         bind_cu.namespace = cu.namespace
         self.bind_cus.append(bind_cu)
-        self.main_cu._unified_deps.append(bind_cu)
+        self.main_cu._unified_deps.append(UnifiedDependency(bind_cu, buildmeta_inherit=True))
         # self.main_cu.add_param_class("bind_{}".format(bind_cu.class_name), bind_cu)
         return bind_cu
 

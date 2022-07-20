@@ -7,6 +7,7 @@ from pccm import builder, core
 from pccm.middlewares import pybind
 from pccm.test_data.mod import PbTestVirtual, Test3, Test4, OtherSimpleClass
 import pickle 
+from ccimport import BuildMeta
 
 def test_core():
     cu = Test4()
@@ -21,9 +22,10 @@ def test_core():
     cu_scratch.add_func_decl(core.FunctionDecl(scratch_meta, scratch_code_obj))
     cu_scratch.namespace = "scratch"
     cu_scratch.class_name = "ScratchClass"
+    build_meta = BuildMeta()
     lib = builder.build_pybind(
         [cu_scratch, cu, cu2, PbTestVirtual()],
-        Path(__file__).parent / "wtf2")
+        Path(__file__).parent / "wtf2", build_meta)
     assert lib.pccm.test_data.mod.Test4.add_static(1, 2) == 3
     assert not hasattr(lib.pccm.test_data.mod.Test4, "invalid_method")
     t3 = lib.pccm.test_data.mod.Test3()

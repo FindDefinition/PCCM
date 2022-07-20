@@ -49,6 +49,8 @@ class Test2(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_dependency(Test1)
+        self.build_meta.add_private_cflags("g++", "-fvisibility=hidden")
+        self.build_meta.add_public_cflags("g++", "-Weffc++")
 
     @pccm.member_function
     def add(self):

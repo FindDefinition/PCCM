@@ -2,9 +2,11 @@ import importlib.util
 import os
 import sys
 from typing import Type, TypeVar
-import re 
+import re
+from pathlib import Path
 
 _TYPE_STRING_PATTERN = re.compile(r"<class '(.*)'>")
+
 
 def project_is_editable(proj_name: str):
     """Is distribution an editable install?"""
@@ -12,6 +14,15 @@ def project_is_editable(proj_name: str):
     if spec is None or spec.origin is None:
         raise ModuleNotFoundError(
             f"{proj_name} not found. you need to install it by pip.")
+    git_ignore_check = (Path(spec.origin).parent.parent /
+                        ".gitignore").exists()
+    setuppy_check = (Path(spec.origin).parent.parent / "setup.py").exists()
+    # if we find gitignore or setup.py in a package, this package is editable
+    # installed for all of my python project.
+    # for project with custom path (e.g. src/pkg_name), this check doesn't work.
+    if setuppy_check or git_ignore_check:
+        return True
+    # following check doens't work in some environment.
     for path_item in sys.path:
         egg_link = os.path.join(path_item, proj_name + '.egg-link')
         if os.path.isfile(egg_link):

@@ -405,6 +405,7 @@ class InlineBuilder:
                timeout: float=999999.0,
                disable_cache: bool = False):
         """use $var to capture python objects, use $(var.shape[0]) to capture anonymous expr.
+        use different to handle different arg types.
         ~20-100us run overhead. 
         only support: 
         1. int/float/str and nested containers of int/float/str.

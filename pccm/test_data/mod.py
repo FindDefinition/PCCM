@@ -95,6 +95,8 @@ class PbTestVirtual(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_enum("EnumExample", [("kValue1", 1), ("kValue2", 2)])
         self.add_member("bbb", "EnumClassExample", "EnumClassExample::kValue1")
 
+        # self.build_meta.add_private_cflags("g++", "WTF")
+
     @pccm.pybind.mark(virtual=True)
     @pccm.member_function(virtual=True)
     def func_0(self):

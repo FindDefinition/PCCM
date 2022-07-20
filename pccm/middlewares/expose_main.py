@@ -7,7 +7,7 @@ from pccm.core import (Class, CodeSectionClassDef, ConstructorMeta, EnumClass,
                        ExternalFunctionMeta, FunctionCode, FunctionDecl,
                        ManualClass, ManualClassGenerator, Member,
                        MemberFunctionMeta, MiddlewareMeta, ParameterizedClass,
-                       StaticMemberFunctionMeta)
+                       StaticMemberFunctionMeta, UnifiedDependency)
 from pccm.core.markers import middleware_decorator
 
 
@@ -59,7 +59,7 @@ class ExposeMain(ManualClassGenerator):
         self.singleton.graph_inited = True
 
     def create_manual_class(self, cu: Class) -> ManualClass:
-        self.singleton._unified_deps.append(cu)
+        self.singleton._unified_deps.append(UnifiedDependency(cu, buildmeta_inherit=True))
         return self.singleton
 
     def get_code_units(self) -> List[Class]:

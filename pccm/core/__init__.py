@@ -13,13 +13,16 @@ from typing import (Any, Callable, Deque, Dict, List, Optional, Set, Tuple,
 from ccimport import compat, loader
 from pccm.constants import (PCCM_CLASS_META_KEY, PCCM_FUNC_META_KEY,
                             PCCM_INIT_DECORATOR_KEY)
-from pccm.core.buildmeta import BuildMeta, _unique_list_keep_order
+from ccimport.buildmeta import BuildMeta, _unique_list_keep_order
 from pccm.core.codegen import Block, generate_code, generate_code_list
 from pccm.core.funccode import (Argument, TemplateNonTypeArgument,
                                 TemplateTypeArgument)
 from pccm.core.parsers import arg_parser
 from pccm.utils import get_qualname_of_type
 from pccm.core.inspecttools import get_members
+
+from ccimport.buildtools.writer import default_build_meta
+
 _HEADER_ONLY_PRE_ATTRS = set(["static", "virtual", "friend"])  # type: Set[str]
 _HEADER_ONLY_POST_ATTRS = set(["final", "override",
                                "noexcept"])  # type: Set[str]
@@ -34,6 +37,7 @@ class FuncArgAttrHandler(abc.ABC):
     @abc.abstractmethod
     def handle(self, code: "FunctionCode", args: List[Argument]):
         raise NotImplementedError
+
 
 _FCODE_ARGUMENT_ATTR_HOOKS: Dict[str, Type[FuncArgAttrHandler]] = {}
 
@@ -52,6 +56,7 @@ def _get_attr_hook(type_str: str):
     res = _FCODE_ARGUMENT_ATTR_HOOKS.get(type_str, None)
     return res
 
+
 def _clean_code(code: str):
     lines = code.split("\n")
     # filter empty lines
@@ -65,6 +70,7 @@ def _clean_code(code: str):
                 min_indent = min(min_indent, i)
                 break
     return "\n".join(l[min_indent:] for l in lines)
+
 
 _CPP_OPERATOR_ENC = {
     "+": "add",
@@ -108,6 +114,7 @@ _CPP_OPERATOR_ENC = {
 
 _IDENTIFIER_RE = re.compile("[_a-zA-Z][_a-zA-Z0-9]*")
 
+
 def _cpp_operator_name_conversion(name: str):
     name = name.strip()
     if _IDENTIFIER_RE.fullmatch(name) is None:
@@ -122,7 +129,7 @@ def _cpp_operator_name_conversion(name: str):
             else:
                 return "pccm_" + parts[0] + "_" + _CPP_OPERATOR_ENC[parts[1]]
         raise NotImplementedError
-    return name 
+    return name
 
 
 class FunctionMeta(object):
@@ -495,9 +502,8 @@ class FunctionCode(object):
 
         self._additional_pre_attrs = []  # type: List[str]
 
-        self._impl_only_deps: List[Type[Class]] = []
-        self._impl_only_pdeps: List[Tuple[str, "ParameterizedClass",
-                                          Optional[str]]] = []
+        self._impl_only_deps: List[Dependency] = []
+        self._impl_only_pdeps: List[Dependency] = []
         self._invalid = False
 
         self._type_to_hook: Dict[str, FuncArgAttrHandler] = {}
@@ -520,7 +526,9 @@ class FunctionCode(object):
         self._blocks[-1].body.append(_clean_code(code))
         return self
 
-    def add_dependency(self, *no_param_class_cls: Type["Class"]):
+    def add_dependency(self,
+                       *no_param_class_cls: Type["Class"],
+                       buildmeta_inherit: bool = True):
         """another method to add impl-only dependency.
         """
         for npcls in no_param_class_cls:
@@ -528,13 +536,15 @@ class FunctionCode(object):
                 raise ValueError(
                     "you can't use class inherit from param class as"
                     " a dependency. use add_param_class instead.")
-            self._impl_only_deps.append(npcls)
+            dep_with_meta = Dependency(npcls, buildmeta_inherit=buildmeta_inherit)
+            self._impl_only_deps.append(dep_with_meta)
         return self
 
     def add_param_class(self,
                         subnamespace: str,
                         param_class: "ParameterizedClass",
-                        name_alias: Optional[str] = None):
+                        name_alias: Optional[str] = None,
+                        buildmeta_inherit: bool = True):
         """another method to add impl-only param class dependency.
         """
         # TODO check alias is unique
@@ -542,7 +552,9 @@ class FunctionCode(object):
             msg = "can only add Param Class, but your {} is Class".format(
                 param_class.class_name)
             raise ValueError(msg)
-        self._impl_only_pdeps.append((subnamespace, param_class, name_alias))
+        dep_with_meta = Dependency(param_class, name_alias, subnamespace,
+                          buildmeta_inherit)
+        self._impl_only_pdeps.append(dep_with_meta)
         return self
 
     @contextlib.contextmanager
@@ -908,6 +920,55 @@ def _init_decorator(func, cls):
     return wrapper
 
 
+class Dependency(object):
+    def __init__(self,
+                 cu: Union["Type[Class]", "ParameterizedClass"],
+                 alias: Optional[str] = None,
+                 spec_namespace: Optional[str] = None,
+                 buildmeta_inherit: bool = True) -> None:
+        self.cu = cu
+        self.alias = alias
+        self.spec_namespace = spec_namespace
+        self.buildmeta_inherit = buildmeta_inherit
+        self.is_param_class = isinstance(self.cu, ParameterizedClass)
+
+    def get_class_type(self):
+        assert not isinstance(self.cu, ParameterizedClass)
+        return self.cu
+
+    def get_param_class_and_ns(self):
+        assert isinstance(self.cu, ParameterizedClass)
+        assert self.spec_namespace is not None
+        return self.cu, self.spec_namespace
+
+    def get_param_class(self):
+        assert isinstance(self.cu, ParameterizedClass)
+        return self.cu
+
+
+class UnifiedDependency(object):
+    def __init__(self,
+                 cu: Union["Class", "ParameterizedClass"],
+                 buildmeta_inherit: bool = True) -> None:
+        self.cu = cu
+        self.buildmeta_inherit = buildmeta_inherit
+        self.is_param_class = isinstance(self.cu, ParameterizedClass)
+
+    def get_class_type(self):
+        assert not self.is_param_class
+        return type(self.cu)
+
+    def get_class(self):
+        assert not self.is_param_class
+        return self.cu
+
+    def get_param_class(self):
+        assert isinstance(self.cu, ParameterizedClass)
+        return self.cu
+
+    def __repr__(self) -> str:
+        return self.cu.__repr__()
+
 class Class(object):
     """
     TODO split user Class and graph node.
@@ -953,15 +1014,14 @@ class Class(object):
         }  # type: Dict[Optional[Type[Class]], List[MiddlewareMeta]]
 
         # self._param_class = OrderedDict(
-        # )  # type: OrderedDict[str, List[Tuple[ParameterizedClass, Optional[str]]]]
+        # )  # type: OrderedDict[str, List[Dependency]]
 
         self._this_type_to_param_class = {
             None: OrderedDict()
-        }  # type: Dict[Optional[Type[Class]], Dict[str, ParameterizedClass]]
-
-        self._this_type_to_param_class_alias = {
+        }  # type: Dict[Optional[Type[Class]], Dict[str, List[Dependency]]]
+        self._this_type_to_param_class_ids = {
             None: OrderedDict()
-        }  # type: Dict[Optional[Type[Class]], Dict[str, str]]
+        }  # type: Dict[Optional[Type[Class]], Dict[int, str]]
 
         # self._typedefs = []  # type: List[Typedef]
 
@@ -998,7 +1058,7 @@ class Class(object):
 
         self._this_type_to_deps = {
             None: []
-        }  # type: Dict[Optional[Type[Class]], List[Type[Class]]]
+        }  # type: Dict[Optional[Type[Class]], List[Dependency]]
 
         # self._impl_mains = OrderedDict(
         # )  # type: Dict[str, Tuple[str, List[str]]]
@@ -1018,7 +1078,7 @@ class Class(object):
         }  # type: Dict[Optional[Type[Class]], OrderedDict[str, List[Type[Class]]]]
         self._this_type_to_impl_only_param_cls_dep = {
             None: OrderedDict()
-        }  # type: Dict[Optional[Type[Class]], Dict[Optional[Type[Class]], Dict[str, Tuple[str, List[str]]]]]
+        }  # type: Dict[Optional[Type[Class]], Dict[str, List[Dependency]]]
 
         self._this_type_to_manual_parent = {
             None: ""
@@ -1028,7 +1088,7 @@ class Class(object):
 
         # filled during graph building
         self._graph_inited = False  # type: bool
-        self._unified_deps = []  # type: List[Class]
+        self._unified_deps = []  # type: List[UnifiedDependency]
         self._function_decls = []  # type: List[FunctionDecl]
         self._namespace = None  # type: Optional[str]
         self._parent_class_checked = False  # type: bool
@@ -1058,6 +1118,14 @@ class Class(object):
         if this_type not in self._this_type_to_param_class:
             self._this_type_to_param_class[this_type] = OrderedDict()
         return self._this_type_to_param_class[this_type]
+    
+    @property
+    def _param_class_ids(self):
+        this_type = self.__get_this_type()
+        if this_type not in self._this_type_to_param_class_ids:
+            self._this_type_to_param_class_ids[this_type] = OrderedDict()
+        return self._this_type_to_param_class_ids[this_type]
+
 
     @property
     def _typedefs(self):
@@ -1188,6 +1256,7 @@ class Class(object):
         assert self._namespace is not None
         return "::".join(self._namespace.split("."))
 
+
     @property
     def graph_inited(self) -> bool:
         return self._graph_inited
@@ -1201,6 +1270,19 @@ class Class(object):
         if self.namespace is None:
             return None
         return "{}-{}".format(self.namespace, self.class_name)
+
+    @property
+    def camelcase_uid(self):
+        assert self._namespace is not None
+        return "_".join(self._namespace.split(".") + [self.class_name])
+
+    def __repr__(self):
+        if self.uid is None:
+            return super().__repr__()
+        return self.uid
+
+    def get_unified_deps(self):
+        return self._unified_deps
 
     def add_member(self,
                    name: str,
@@ -1231,15 +1313,14 @@ class Class(object):
         self._local_class_mw_metas.append(meta)
 
     def _assign_overload_flag_to_func_decls(self):
-        # TODO member function can't overload static function.
-        # we handle overload in three group: extend functions, member functions and static member functions.
-        extend_decl_count = defaultdict(int)  # type: Dict[str, int]
+        # we handle overload in three group: external functions, member functions and static member functions.
+        external_decl_count = defaultdict(int)  # type: Dict[str, int]
         member_decl_count = defaultdict(int)  # type: Dict[str, int]
         static_member_decl_count = defaultdict(int)  # type: Dict[str, int]
         for decl in self._function_decls:
             cpp_func_name = decl.get_function_name()
             if isinstance(decl.meta, ExternalFunctionMeta):
-                extend_decl_count[cpp_func_name] += 1
+                external_decl_count[cpp_func_name] += 1
             elif isinstance(decl.meta, StaticMemberFunctionMeta):
                 static_member_decl_count[cpp_func_name] += 1
             elif isinstance(decl.meta, MemberFunctionMeta):
@@ -1247,7 +1328,7 @@ class Class(object):
         for decl in self._function_decls:
             cpp_func_name = decl.get_function_name()
             if isinstance(decl.meta, ExternalFunctionMeta):
-                if extend_decl_count[cpp_func_name] > 1:
+                if external_decl_count[cpp_func_name] > 1:
                     decl.is_overload = True
             elif isinstance(decl.meta, StaticMemberFunctionMeta):
                 if static_member_decl_count[cpp_func_name] > 1:
@@ -1256,7 +1337,9 @@ class Class(object):
                 if member_decl_count[cpp_func_name] > 1:
                     decl.is_overload = True
 
-    def add_dependency(self, *no_param_class_cls: Type["Class"]):
+    def add_dependency(self,
+                       *no_param_class_cls: Type["Class"],
+                       buildmeta_inherit: bool = True):
         # TODO enable name alias for Class
         # TODO name alias must be unique
         for npcls in no_param_class_cls:
@@ -1264,20 +1347,31 @@ class Class(object):
                 raise ValueError(
                     "you can't use class inherit from param class as"
                     " a dependency. use add_param_class instead.")
-            self._deps.append(npcls)
+            udep = Dependency(npcls, buildmeta_inherit=buildmeta_inherit)
+            self._deps.append(udep)
 
     def add_param_class(self,
                         subnamespace: str,
                         param_class: "ParameterizedClass",
-                        name_alias: Optional[str] = None):
+                        name_alias: Optional[str] = None,
+                        buildmeta_inherit: bool = True):
         # TODO check alias is unique
         if not isinstance(param_class, ParameterizedClass):
             msg = "can only add Param Class, but your {} is Class".format(
                 param_class.class_name)
             raise ValueError(msg)
+        all_pcls_ids = self._param_class_ids
+        pcls_id = id(param_class)
+        # ensure pcls instance is unique.
+        if pcls_id in all_pcls_ids:
+            assert subnamespace == all_pcls_ids[pcls_id], "you add this existed pcls with different namespace."
+            return
         if subnamespace not in self._param_class:
             self._param_class[subnamespace] = []
-        self._param_class[subnamespace].append((param_class, name_alias))
+        dep = Dependency(param_class, name_alias, subnamespace,
+                         buildmeta_inherit)
+        self._param_class[subnamespace].append(dep)
+        self._param_class_ids[id(param_class)] = subnamespace
 
     def add_impl_only_dependency(self,
                                  func_or_list_funcs: Union[Callable,
@@ -1306,9 +1400,12 @@ class Class(object):
                                                             List[Callable]],
                                   subnamespace: str,
                                   param_class: "ParameterizedClass",
-                                  name_alias: Optional[str] = None):
+                                  name_alias: Optional[str] = None,
+                                  buildmeta_inherit: bool = True):
         if not isinstance(func_or_list_funcs, list):
             func_or_list_funcs = [func_or_list_funcs]
+        udep = Dependency(param_class, name_alias, subnamespace,
+                          buildmeta_inherit)
         for func in func_or_list_funcs:
             if inspect.ismethod(func):
                 func = func.__func__
@@ -1318,33 +1415,43 @@ class Class(object):
             name = func.__name__
             if name not in self._impl_only_param_cls_dep:
                 self._impl_only_param_cls_dep[name] = []
-            self._impl_only_param_cls_dep[name].append(param_class)
-        return self.add_param_class(subnamespace, param_class, name_alias)
+            self._impl_only_param_cls_dep[name].append(udep)
+        return self.add_param_class(subnamespace, param_class, name_alias,
+                                    buildmeta_inherit)
 
-    def add_impl_only_dependency_by_name(self, name: str,
-                                         *no_param_class_cls: Type["Class"]):
+    def add_impl_only_dependency_by_name(self,
+                                         name: str,
+                                         *no_param_class_cls: Type["Class"],
+                                         buildmeta_inherit: bool = True):
+        all_regular_dep_cls = [
+            d.cu for d in self._deps if not d.is_param_class
+        ]
         if name not in self._impl_only_cls_dep:
             self._impl_only_cls_dep[name] = []
         for npcls in no_param_class_cls:
             self._impl_only_cls_dep[name].append(npcls)
-            if npcls not in self._deps:
+            if npcls not in all_regular_dep_cls:
                 # only add once
-                self.add_dependency(npcls)
+                self.add_dependency(npcls, buildmeta_inherit=buildmeta_inherit)
 
     def add_impl_only_param_class_by_name(self,
                                           name_or_names: Union[str, List[str]],
                                           subnamespace: str,
                                           param_class: "ParameterizedClass",
-                                          name_alias: Optional[str] = None):
+                                          name_alias: Optional[str] = None,
+                                          buildmeta_inherit: bool = True):
         """this function should only be used for dynamic Class.
         """
+        udep = Dependency(param_class, name_alias, subnamespace,
+                          buildmeta_inherit)
         if not isinstance(name_or_names, list):
             name_or_names = [name_or_names]
         for name in name_or_names:
             if name not in self._impl_only_param_cls_dep:
                 self._impl_only_param_cls_dep[name] = []
-            self._impl_only_param_cls_dep[name].append(param_class)
-        return self.add_param_class(subnamespace, param_class, name_alias)
+            self._impl_only_param_cls_dep[name].append(udep)
+        return self.add_param_class(subnamespace, param_class, name_alias,
+                                    buildmeta_inherit)
 
     def add_impl_main(self,
                       impl_name: str,
@@ -1450,17 +1557,19 @@ class Class(object):
             return ""
         # we can only get type of Class, so we need to iterate unified deps to
         # avoid construct Class instance.
-        for dep in self._unified_deps:
-            if type(dep) is parent:
-                return dep.canonical_name
+        for udep in self._unified_deps:
+            cu = udep.cu
+            if type(cu) is parent:
+                return cu.canonical_name
         return ""
 
-    def get_class_deps(self) -> List[Type["Class"]]:
+    def get_class_deps(self) -> List[Dependency]:
         res = list(self._deps)
         # get all dep from "add_dependency" and inherited class
         p = self.get_parent_class()
         if p is not None:
-            res.append(p)
+            udep = Dependency(p)
+            res.append(udep)
         return res
 
     def get_dependency_alias(self, dep: "Class") -> Optional[str]:
@@ -1476,8 +1585,10 @@ class Class(object):
             ns_stmt = "using {} = {};".format(dep.class_name, name_with_ns)
             return ns_stmt
         else:
-            for k, pcls_alias_tuples in self._param_class.items():
-                for pcls, alias in pcls_alias_tuples:
+            for k, udeps in self._param_class.items():
+                for udep in udeps:
+                    pcls, _ = udep.get_param_class_and_ns()
+                    alias = udep.alias
                     if dep is pcls and alias is not None:
                         name_with_ns = "::".join(dep.namespace.split("."))
                         ns_stmt = "using {} = {}::{};".format(
@@ -1489,8 +1600,8 @@ class Class(object):
         assert self.graph_inited, "you must build dependency graph before generate code"
         # generate namespace alias for class
         dep_alias = []  # type: List[str]
-        for dep in self._unified_deps:
-            alias_stmt = self.get_dependency_alias(dep)
+        for udep in self._unified_deps:
+            alias_stmt = self.get_dependency_alias(udep.cu)
             if alias_stmt:
                 dep_alias.append(alias_stmt)
         return dep_alias
@@ -1536,12 +1647,13 @@ class Class(object):
     def get_common_deps(self) -> List["Class"]:
         assert self.graph_inited, "you must build dependency graph before generate code"
         res = []  # type: List[Class]
-        for dep in self._unified_deps:
+        for udep in self._unified_deps:
             is_impl_only = False
+            dep = udep.cu
             if isinstance(dep, ParameterizedClass):
                 for pcls_deps in self._impl_only_param_cls_dep.values():
                     for dep_candidate in pcls_deps:
-                        if dep_candidate is dep:
+                        if dep_candidate.cu is dep:
                             is_impl_only = True
                             break
                     if is_impl_only:
@@ -1558,6 +1670,7 @@ class Class(object):
             if not is_impl_only:
                 res.append(dep)
         return res
+
 
 class CodeSection(abc.ABC):
     # @abc.abstractmethod
@@ -1812,7 +1925,7 @@ class CodeGenerator(object):
         self._get_decls_cache = {
         }  # type: Dict[Union[Type[Class], ParameterizedClass], list[FunctionDecl]]
 
-        self.cu_type_to_cu = {}  # type: Dict[Type[Class], Class]
+        self.cu_type_to_cu = {}  # type: Dict[Type[Class], UnifiedDependency]
 
     def _apply_middleware_to_cus(self, uid_to_cu: Dict[str, Class]):
         # manual middlewares
@@ -1889,7 +2002,8 @@ class CodeGenerator(object):
         # 1. build dependency graph
 
         all_cus = set()  # type: Set[Class]
-        cu_type_to_cu: Dict[Type[Class], Class] = self.cu_type_to_cu
+        cu_type_to_cu: Dict[Type[Class],
+                            UnifiedDependency] = self.cu_type_to_cu
         for cu in cus:
             if isinstance(cu,
                           Class) and not isinstance(cu, ParameterizedClass):
@@ -1897,7 +2011,7 @@ class CodeGenerator(object):
                 if cu_type is Class:
                     msg = "you must set class name if you create class from scratch."
                     assert cu._user_provided_class_name is not None, msg
-                cu_type_to_cu[cu_type] = cu
+                cu_type_to_cu[cu_type] = UnifiedDependency(cu)
                 if cu.namespace is None:
                     extract_ns = extract_module_id_of_class(cu_type, root)
                     if extract_ns is None:
@@ -1909,7 +2023,7 @@ class CodeGenerator(object):
                     cu.namespace = extract_ns
         # uid_to_cu order: leaf to root
         uid_to_cu = OrderedDict()  # type: Dict[str, Class]
-        stack: Deque[Tuple[Class, Set[Type[Class]]]] = deque([])
+        stack: Deque[Tuple[Class, Set[Union[Type[Class], ParameterizedClass]]]] = deque([])
         for cu in cus:
             stack.append((cu, set()))
         while stack:
@@ -1926,62 +2040,77 @@ class CodeGenerator(object):
                 for decl in self.cached_extract_classunit_methods(cur_cu):
                     code_obj = decl.code
                     # decl.meta.name
-                    for dep in code_obj._impl_only_deps:
+                    for dep_with_meta in code_obj._impl_only_deps:
                         cur_cu.add_impl_only_dependency_by_name(
-                            decl.meta.name, dep)
-                    for (subns, pcls, alias) in code_obj._impl_only_pdeps:
+                            decl.get_function_name(),
+                            dep_with_meta.get_class_type(),
+                            buildmeta_inherit=dep_with_meta.buildmeta_inherit)
+                    for dep_with_meta in code_obj._impl_only_pdeps:
+                        dep_pcls, dep_subns = dep_with_meta.get_param_class_and_ns()
                         cur_cu.add_impl_only_param_class_by_name(
-                            decl.meta.name, subns, pcls, alias)
+                            decl.get_function_name(), dep_subns, dep_pcls, dep_with_meta.alias)
 
-                for dep in cur_cu.get_class_deps():
-                    if dep in cur_type_trace:
+                for dep_obj in cur_cu.get_class_deps():
+                    cu_type = dep_obj.get_class_type()
+                    if cu_type in cur_type_trace:
                         raise ValueError("cycle detected")
-                    if dep not in cu_type_to_cu:
-                        cu_type_to_cu[dep] = dep()
-                        extract_ns = extract_module_id_of_class(dep, root=root)
+                    if cu_type not in cu_type_to_cu:
+                        cu_type_to_cu[cu_type] = UnifiedDependency(
+                            cu_type(), buildmeta_inherit=dep_obj.buildmeta_inherit)
+                        extract_ns = extract_module_id_of_class(cu_type, root=root)
                         if extract_ns is None:
                             if root is not None:
                                 print(Path(root).resolve())
                             raise ValueError(
-                                f"extract module id failed. {root}, {dep}, {Path(inspect.getfile(dep)).resolve()}"
+                                f"extract module id failed. {root}, {cu_type}, {Path(inspect.getfile(cu_type)).resolve()}"
                             )
-                        cu_type_to_cu[dep].namespace = extract_ns
-                    cur_cu._unified_deps.append(cu_type_to_cu[dep])
+                        cu_type_to_cu[cu_type].cu.namespace = extract_ns
+                    cur_cu._unified_deps.append(cu_type_to_cu[cu_type])
                     cur_type_trace_copy = cur_type_trace.copy()
-                    cur_type_trace_copy.add(dep)
-                    stack.append((cu_type_to_cu[dep], cur_type_trace_copy))
+                    cur_type_trace_copy.add(cu_type)
+                    stack.append((cu_type_to_cu[cu_type].cu, cur_type_trace_copy))
 
-                for k, pcls_with_alias_tuples in cur_cu._param_class.items():
-                    for pcls, _ in pcls_with_alias_tuples:
-                        if type(pcls) in cur_type_trace:
+                for k, pcls_deps in cur_cu._param_class.items():
+                    for pcls_dep in pcls_deps:
+                        pcls, _ = pcls_dep.get_param_class_and_ns()
+                        if pcls in cur_type_trace:
                             raise ValueError("cycle detected")
                         if pcls.namespace is None:
                             pcls.namespace = cur_ns + "." + k
-                        cur_cu._unified_deps.append(pcls)
+                        cur_cu._unified_deps.append(
+                            UnifiedDependency(pcls, pcls_dep.buildmeta_inherit))
                         cur_type_trace_copy = cur_type_trace.copy()
-                        cur_type_trace_copy.add(type(pcls))
+                        cur_type_trace_copy.add(pcls)
                         stack.append((pcls, cur_type_trace_copy))
                 cur_cu._function_decls.extend(
                     self.cached_extract_classunit_methods(cur_cu))
                 cur_cu._assign_overload_flag_to_func_decls()
                 cur_cu.graph_inited = True
             else:
-                for dep in cur_cu._unified_deps:
-                    if type(dep) in cur_type_trace:
+                for udep in cur_cu._unified_deps:
+                    if udep.is_param_class:
+                        cycle_detected = udep.cu in cur_type_trace
+                    else:
+                        cycle_detected = type(udep.cu) in cur_type_trace
+                    if cycle_detected:
                         raise ValueError("cycle detected")
                     cur_type_trace_copy = cur_type_trace.copy()
-                    cur_type_trace_copy.add(type(dep))
-                    stack.append((dep, cur_type_trace_copy))
+                    if udep.is_param_class:
+                        cur_type_trace_copy.add(udep.get_param_class())
+                    else:
+                        cur_type_trace_copy.add(udep.get_class_type())
+                    stack.append((udep.cu, cur_type_trace_copy))
         # make uid_to_cu reversed, i.e. from leaf-root to root-leaf
         # perform post-order here because we need to handle leaf nodes first in following process.
-        uid_to_cu = self._postorder_sort(cus)
+        uid_to_cu = self.postorder_sort(cus)
         # uid_to_cu = OrderedDict(reversed(uid_to_cu.items()))
         if run_middleware:
             self._apply_middleware_to_cus(uid_to_cu)
         return list(uid_to_cu.values())
         # self.built = True
 
-    def _postorder_sort_recursive(self, cu: Class, items: List[Tuple[str,
+    @staticmethod
+    def _postorder_sort_recursive(cu: Class, items: List[Tuple[str,
                                                                      Class]],
                                   visited: Set[str]):
         # TODO iter-based
@@ -1990,15 +2119,16 @@ class CodeGenerator(object):
         if cu.uid in visited:
             return
         visited.add(uid)
-        for dep in cu._unified_deps:
-            self._postorder_sort_recursive(dep, items, visited)
+        for udep in cu.get_unified_deps():
+            CodeGenerator._postorder_sort_recursive(udep.cu, items, visited)
         items.append((uid, cu))
 
-    def _postorder_sort(self, root_cus: List[Class]):
+    @staticmethod
+    def postorder_sort(root_cus: List[Class]):
         items: List[Tuple[str, Class]] = []
         visited: Set[str] = set()
         for v in root_cus:
-            self._postorder_sort_recursive(v, items, visited)
+            CodeGenerator._postorder_sort_recursive(v, items, visited)
         return OrderedDict(items)
 
     def cached_get_cu_members(self, cu: Class):
@@ -2036,34 +2166,191 @@ class CodeGenerator(object):
     def get_code_units(self) -> List[Class]:
         return self.code_units
 
+    def construct_build_meta(self, cus: List[Union[Class, ParameterizedClass]]):
+        uid_to_cus = self.postorder_sort(cus)
+        uid_to_cu_build_meta: Dict[str, BuildMeta] = {}
+        # add global cflags and includes
+        global_meta = BuildMeta()
+        for uid, cu in uid_to_cus.items():
+            if uid in uid_to_cu_build_meta:
+                continue 
+            cu_meta = cu.build_meta
+            global_meta += cu_meta
+            # inherit flags
+            for udep in cu.get_unified_deps():
+                if udep.buildmeta_inherit:
+                    uid_udep = udep.cu.uid
+                    assert uid_udep is not None 
+                    udep_meta = uid_to_cu_build_meta[uid_udep]
+                    cu_meta = cu_meta.inherit(udep_meta)
+            uid_to_cu_build_meta[uid] = cu_meta
+        # for m in uid_to_cu_build_meta.values():
+        #     m.cflags_node.global_flags = global_meta.cflags_node.global_flags
+        #     m.include_node.global_incs = global_meta.include_node.global_incs
+        #     m.libpaths = global_meta.libpaths
+        #     m.libraries = global_meta.libraries
+
+        return uid_to_cu_build_meta, global_meta
+
     def code_generation(self,
                         cus: List[Union[Class, ParameterizedClass]],
                         include_root: Optional[Path] = None,
                         global_header_only: bool = False):
+        res = self.code_generation_v2(cus, include_root, global_header_only, False)
+        return res[0], res[1], res[2]
+
+    def code_generation_v2(self,
+                        cus: List[Union[Class, ParameterizedClass]],
+                        include_root: Optional[Path] = None,
+                        global_header_only: bool = False,
+                        build_meta: bool = True):
         header_dict = OrderedDict()  # type: Dict[str, CodeSectionHeader]
         impl_dict = OrderedDict()  # type: Dict[str, CodeSectionImpl]
         header_to_impls = OrderedDict()  # type: Dict[str, List[str]]
+        impl_to_buildmeta = OrderedDict()  # type: Dict[str, BuildMeta]
+        uid_to_meta: Dict[str, BuildMeta] = {}
+        header_to_meta: Dict[str, BuildMeta] = {}
+        global_meta = BuildMeta()
+        if build_meta:
+            uid_to_meta, global_meta = self.construct_build_meta(cus)
         for cu in cus:
             cu_header_dict, cu_impls_dict = self.generate_cu_code_v2(
-                cu, include_root=include_root, global_header_only=global_header_only)
+                cu,
+                include_root=include_root,
+                global_header_only=global_header_only)
             header_key = list(cu_header_dict.keys())[0]
             header_to_impls[header_key] = list(cu_impls_dict.keys())
             header_dict.update(cu_header_dict)
             impl_dict.update(cu_impls_dict)
-        return header_dict, impl_dict, header_to_impls
+            if build_meta:
+                assert cu.uid is not None 
+                meta = uid_to_meta[cu.uid]
+                for k in cu_impls_dict.keys():
+                    impl_to_buildmeta[k] = meta
+                header_to_meta[header_key] = meta
+        return header_dict, impl_dict, header_to_impls, impl_to_buildmeta, header_to_meta
+
+    def code_generation_with_cmake(self,
+                        target_name: str,
+                        cus: List[Union[Class, ParameterizedClass]],
+                        include_root: Optional[Path] = None,
+                        cxx_standard="14"):
+        header_dict = OrderedDict()  # type: Dict[str, CodeSectionHeader]
+        impl_dict = OrderedDict()  # type: Dict[str, CodeSectionImpl]
+        header_to_impls = OrderedDict()  # type: Dict[str, List[str]]
+        impl_to_buildmeta = OrderedDict()  # type: Dict[str, BuildMeta]
+        uid_to_meta: Dict[str, BuildMeta] = {}
+        header_to_meta: Dict[str, BuildMeta] = {}
+        path_to_cmake_content: Dict[str, str] = {}
+
+        uid_to_meta, global_meta = self.construct_build_meta(cus)
+        ccimport_default_meta = default_build_meta()
+        global_meta = global_meta + ccimport_default_meta
+        main_cmake_contents: List[str] = []
+        cmake_static_libs: List[str] = []
+        main_cmake_contents.append(f"""
+cmake_minimum_required(VERSION 3.20)
+
+find_package(CUDAToolkit)
+        """)
+        for cu in cus:
+                
+            assert cu.uid is not None 
+            meta = uid_to_meta[cu.uid]
+            cu_header_dict, cu_impls_dict = self.generate_cu_code_v2(
+                cu,
+                include_root=include_root,
+                global_header_only=False)
+
+            header_key = list(cu_header_dict.keys())[0]
+            header_to_impls[header_key] = list(cu_impls_dict.keys())
+            header_dict.update(cu_header_dict)
+            impl_dict.update(cu_impls_dict)
+            if cu_impls_dict:
+                first = list(cu_impls_dict.keys())[0]
+                cmakepath = str(Path(first).parent / "CMakeLists.txt")
+                for p in list(Path(cmakepath).parents)[:-1]:
+                    path_to_cmake_content[str(p / "CMakeLists.txt")] = ""
+                impl_file_names = [Path(f).name for f in cu_impls_dict.keys()]
+                includes = global_meta.get_global_includes() + meta.get_local_includes()
+                includes = list(map(str, includes))
+                includes_str = "\n".join("    " + p for p in includes)
+                compiler_to_cflags = meta.get_all_cflags()
+                cuda_flags = ""
+                cu_target_name = cu.camelcase_uid
+                nvcc_flags = compiler_to_cflags.get("nvcc", []) + global_meta.get_global_cflags().get("nvcc", [])
+                if nvcc_flags:
+                    nvcc_flags_str = "\n".join(["    " + p for p in nvcc_flags])
+
+                    cuda_flags = (f"target_compile_options({cu_target_name} PRIVATE "
+                    f"$<$<COMPILE_LANGUAGE:CUDA>:\n {nvcc_flags_str}>)")
+                # TODO here we only use g++/cl.
+                if compat.InWindows:
+                    cflags_list = compiler_to_cflags.get("cl", []) + global_meta.get_global_cflags().get("cl", [])
+                else:
+                    cflags_list = compiler_to_cflags.get("g++", []) + global_meta.get_global_cflags().get("g++", [])
+                cflags_stmt = ""
+                if cflags_list:
+                    cflags_list_str = "\n".join(["    " + p for p in cflags_list])
+                    cflags_stmt = (f"target_compile_options({cu_target_name} PRIVATE "
+                    f"$<$<COMPILE_LANGUAGE:CXX>: \n{cflags_list_str}>)")
+                cmake_static_libs.append(cu_target_name)
+                # TODO why POSITION_INDEPENDENT_CODE (add -dc to nvcc) not working on nvcc?
+                cmakecontents = f"""
+cmake_minimum_required(VERSION 3.20)
+add_library({cu_target_name} OBJECT {' '.join(impl_file_names)})
+# set_target_properties({cu_target_name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties( {cu_target_name} PROPERTIES CXX_STANDARD {cxx_standard} CUDA_STANDARD {cxx_standard})
+
+# set_target_properties({cu_target_name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+# set_target_properties({cu_target_name} PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+
+target_include_directories({cu_target_name} PRIVATE
+{includes_str})
+{cuda_flags}
+{cflags_stmt}
+                """
+                path_to_cmake_content[cmakepath] = cmakecontents
+                main_cmake_contents.append(f"add_subdirectory({str(Path(cmakepath).parent)})")
+
+            for k in cu_impls_dict.keys():
+                impl_to_buildmeta[k] = meta
+            header_to_meta[header_key] = meta
+        targets = '\n'.join([f"$<TARGET_OBJECTS:{p}>" for p in cmake_static_libs])
+        main_cmake_contents.append(f"""
+add_library({target_name} SHARED 
+    {targets}
+)
+
+target_link_libraries({target_name} PRIVATE {' '.join(global_meta.libraries)})
+
+        """)
+        path_to_cmake_content["CMakeLists.txt"] = "\n".join(main_cmake_contents)
+        return header_dict, impl_dict, header_to_impls, impl_to_buildmeta, header_to_meta, path_to_cmake_content
+
 
     def code_written(self,
                      root: Union[str, Path],
                      code_dict: Dict[str, CodeSection],
                      code_fmt: Optional[CodeFormatter] = None):
+        return self.code_written_v2(root, code_dict, {}, code_fmt)[0]
+
+    def code_written_v2(self,
+                     root: Union[str, Path],
+                     code_dict: Dict[str, CodeSection],
+                     build_meta_dict: Dict[str, BuildMeta],
+                     code_fmt: Optional[CodeFormatter] = None):
         # TODO insert md5 to code to detect manual code change
         root_path = Path(root)
         all_paths = []  # type: List[Path]
+        path_to_meta: Dict[Path, BuildMeta] = {}
         if code_fmt is None:
             code_fmt = CodeFormatter()
         for k, v in code_dict.items():
             code_to_write = code_fmt(v.to_string())
             code_path = root_path / k
+            if k in build_meta_dict:
+                path_to_meta[code_path] = build_meta_dict[k]
             if code_path.exists():
                 # read first, if same, don't write to keep file state.
                 with code_path.open("r") as f:
@@ -2078,11 +2365,11 @@ class CodeGenerator(object):
                                                 code_to_write_lines)
                     print(f"--- {code_path} ---")
                     print("\n".join(diff))
-            code_path.parent.mkdir(exist_ok=True, parents=True)
+            code_path.parent.mkdir(0o755, exist_ok=True, parents=True)
             with code_path.open("w") as f:
                 f.write(code_to_write)
             all_paths.append(code_path)
-        return all_paths
+        return all_paths, path_to_meta
 
     def generate_cu_code_v2(self,
                             cu: Class,
@@ -2127,17 +2414,20 @@ class CodeGenerator(object):
             func_name_for_file = func_name
             if not isinstance(meta, (ConstructorMeta, DestructorMeta)):
                 assert func_name != cu_name
-                assert func_name is not None 
+                assert func_name is not None
                 func_name_for_file = _cpp_operator_name_conversion(func_name)
 
             # if isinstance(meta, MemberFunctionMeta):
-            header_only = meta.is_header_only() or code_obj.is_template() or global_header_only
+            header_only = meta.is_header_only() or code_obj.is_template(
+            ) or global_header_only
             impl_file_name = meta.impl_loc
             if not impl_file_name:
                 if isinstance(meta, DestructorMeta):
-                    impl_file_name = "{}_dtor_{}".format(cu_name, func_name_for_file)
+                    impl_file_name = "{}_dtor_{}".format(
+                        cu_name, func_name_for_file)
                 else:
-                    impl_file_name = "{}_{}".format(cu_name, func_name_for_file)
+                    impl_file_name = "{}_{}".format(cu_name,
+                                                    func_name_for_file)
             impl_file_name = "{}/{}/{}{}".format(
                 cu.namespace.replace(".", "/"), cu.class_name, impl_file_name,
                 meta.impl_file_suffix)
@@ -2178,7 +2468,6 @@ class CodeGenerator(object):
                 if code_obj.code_in_ns is not None:
                     impl_dict_code_in_ns[impl_file_name].append(
                         code_obj.code_in_ns)
-
             else:
                 assert code_obj.code_after_include is None, "header only don't support code after include."
             # handle impl-only dependency
@@ -2188,21 +2477,22 @@ class CodeGenerator(object):
             for impl_func_name, cls_deps in cu._impl_only_cls_dep.items():
                 if impl_func_name == meta.name:
                     for udep in cu._unified_deps:
-                        if isinstance(udep, Class) and not isinstance(
-                                udep, ParameterizedClass):
-                            udep_type = type(udep)
+                        udep_cu = udep.cu
+                        if not udep.is_param_class:
+                            udep_type = type(udep_cu)
                             for cls_dep in cls_deps:
                                 if udep_type is cls_dep:
-                                    impl_only_deps[impl_file_name].append(udep)
+                                    impl_only_deps[impl_file_name].append(udep_cu)
 
             for impl_func_name, pcls_deps in cu._impl_only_param_cls_dep.items(
             ):
                 if impl_func_name == meta.name:
                     for udep in cu._unified_deps:
-                        if isinstance(udep, ParameterizedClass):
+                        if udep.is_param_class:
                             for pcls_dep in pcls_deps:
-                                if udep is pcls_dep:
-                                    impl_only_deps[impl_file_name].append(udep)
+                                if udep.cu is pcls_dep.get_param_class():
+                                    impl_only_deps[impl_file_name].append(
+                                        udep.cu)
         cls_funcs_with_index = (member_functions_index_decl +
                                 ctors_index_decl +
                                 static_functions_index_decl +
