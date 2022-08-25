@@ -297,6 +297,12 @@ class InlineClass(Class):
                          "string", "iostream", "fstream")
         self.add_dependency(PyBind11)
 
+class _ModuleMeta:
+    def __init__(self, func: Any, captures: List[CaptureStmt], capture_ctypes: List[BaseType], inner_code: str) -> None:
+        self.func = func
+        self.captures = captures
+        self.capture_ctypes = capture_ctypes
+        self.inner_code = inner_code
 
 class InlineBuilder:
     """
@@ -309,7 +315,8 @@ class InlineBuilder:
             root: Optional[Path] = None,
             build_root: Optional[Path] = None,
             build_kwargs: Optional[Dict[str, Any]] = None,
-            param_deps: Optional[List[pccm.ParameterizedClass]] = None) -> None:
+            param_deps: Optional[List[pccm.ParameterizedClass]] = None,
+            reload_when_code_change: bool = False) -> None:
         self.deps = deps
         if param_deps is None:
             param_deps = []
@@ -321,11 +328,11 @@ class InlineBuilder:
         if build_kwargs is None:
             build_kwargs = {}
         self.build_kwargs = build_kwargs
-        self.module_functions: Dict[Tuple[str, str, int], Any] = {}
-        self.cached_captures: Dict[Tuple[str, str, int],
-                                   List[CaptureStmt]] = {}
-        self.cached_capture_ctypes: Dict[Tuple[str, str, int],
-                                         List[BaseType]] = {}
+        self.modules: Dict[Tuple[str, str, int], _ModuleMeta] = {}
+        # self.cached_captures: Dict[Tuple[str, str, int],
+        #                            List[CaptureStmt]] = {}
+        # self.cached_capture_ctypes: Dict[Tuple[str, str, int],
+        #                                  List[BaseType]] = {}
 
         self.lock = threading.Lock()
 
@@ -334,6 +341,7 @@ class InlineBuilder:
         self.used_names: Set[Tuple[str, str]] = set()
         self.root = root
         self.build_root = build_root
+        self._reload_when_code_change = reload_when_code_change
 
     def _find_exist_module_name(self, code: str, code_hash: str, root: Path):
         cur_dep_ids = self.dep_ids
@@ -425,19 +433,21 @@ class InlineBuilder:
             assert frame is not None
             cur_frame = frame
             _frame_cnt -= 1
-        del frame
+        # del frame
         local_vars = cur_frame.f_locals.copy()
         local_vars.update(additional_vars)
         code_path = cur_frame.f_code.co_filename
         lineno = cur_frame.f_lineno
         key = (code_path, name)
         unique_key = (code_path, name, lineno)
-        del cur_frame
+        if self._reload_when_code_change:
+            unique_key = (code_path, name, -1)
+        # del cur_frame
         with self.lock:
-            if not disable_cache:
-                exist = unique_key in self.module_functions
+            if not disable_cache and not self._reload_when_code_change:
+                exist = unique_key in self.modules
                 if key in self.used_names and not exist:
-                    raise ValueError("you use duplicate name in same file.")
+                    raise ValueError("you use duplicate name in same file.", unique_key)
             else:
                 exist = False
             if not exist:
@@ -537,7 +547,37 @@ class InlineBuilder:
                     args.append(v)
 
                 inner_code_str = execute_modifiers(code_str, replaces)
+
                 assert inner_code_str is not None
+                if self._reload_when_code_change:
+                    exist = unique_key in self.modules
+                    if exist:
+                        prev_inner_code = self.modules[unique_key].inner_code
+                        if prev_inner_code == inner_code_str:
+                            module_meta = self.modules[unique_key]
+                            func = module_meta.func
+                            all_captures = module_meta.captures
+                            all_base_types = module_meta.capture_ctypes
+                            args = []
+                            for cap, bt in zip(all_captures, all_base_types):
+                                if not cap.is_expr:
+                                    if cap.name not in local_vars:
+                                        raise ValueError(
+                                            f"can't find your capture {cap.name} in prev frame.")
+                                    obj = local_vars[cap.name]
+                                else:
+                                    for cap_name in cap.expr_names:
+                                        if cap_name not in local_vars:
+                                            raise ValueError(
+                                                f"can't find your capture {cap_name} in prev frame."
+                                            )
+                                    # eval expr in prev frame
+                                    obj = eval(cap.name, local_vars)
+                                obj = _nested_apply_plugin_transform(bt, obj, self.plugins, user_arg)
+                                args.append(obj)
+                            for v in additional_vars.values():
+                                args.append(v)
+                            return self.run_func(func, *args, user_args=user_arg)
                 if isinstance(code, FunctionCode):
                     container_fcode.ret(code.return_type)
                 meta = self.handle_container_code(inner_code_str, container_fcode, user_arg)
@@ -559,22 +599,22 @@ class InlineBuilder:
 
                 for dep in decl.code._impl_only_deps:
                     pccm_class.add_impl_only_dependency_by_name(
-                        decl.meta.name, dep)
+                        decl.meta.name, dep.get_class_type())
                 if isinstance(code, FunctionCode):
                     for dep in code._impl_only_deps:
                         pccm_class.add_impl_only_dependency_by_name(
-                            decl.meta.name, dep)
+                            decl.meta.name, dep.get_class_type())
 
                 if inner_decl is not None:
                     inner_decl.meta.name = PCCM_INLINE_INNER_FUNCTION_NAME
                     pccm_class.add_func_decl(inner_decl)
                     for dep in inner_decl.code._impl_only_deps:
                         pccm_class.add_impl_only_dependency_by_name(
-                            inner_decl.meta.name, dep)
+                            inner_decl.meta.name, dep.get_class_type())
                     if isinstance(code, FunctionCode):
                         for dep in code._impl_only_deps:
                             pccm_class.add_impl_only_dependency_by_name(
-                                inner_decl.meta.name, dep)
+                                inner_decl.meta.name, dep.get_class_type())
 
                 pccm_class.add_dependency(*self.deps)
                 for pdep in self.param_deps:
@@ -588,17 +628,19 @@ class InlineBuilder:
                 mod_root = self.get_save_root(Path(code_path), self.root, self.build_root)
                 func = self.build(pccm_class, mod_root, name, timeout, user_arg)
                 if not disable_cache:
-                    self.module_functions[unique_key] = func
-                    self.cached_captures[unique_key] = all_captures
-                    self.cached_capture_ctypes[unique_key] = capture_bts
+                    module_meta = _ModuleMeta(func, all_captures, capture_bts, inner_code_str)
+                    self.modules[unique_key] = module_meta
+                    # self.cached_captures[unique_key] = all_captures
+                    # self.cached_capture_ctypes[unique_key] = capture_bts
                     self.used_names.add(key)
                     # breakpoint()
                 return self.run_func(func, *args, user_args=user_arg)
 
         # module already loaded. just run it after transform.
-        func = self.module_functions[unique_key]
-        all_captures = self.cached_captures[unique_key]
-        all_base_types = self.cached_capture_ctypes[unique_key]
+        module_meta = self.modules[unique_key]
+        func = module_meta.func
+        all_captures = module_meta.captures
+        all_base_types = module_meta.capture_ctypes
         args = []
         for cap, bt in zip(all_captures, all_base_types):
             if not cap.is_expr:
