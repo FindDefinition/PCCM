@@ -1,4 +1,7 @@
 # Changelog
+## [0.4.1] - 2022-09-25
+### Fixed
+* fix small bug in annotation gen.
 
 ## [0.3.5] - 2022-07-20
 ### Added

@@ -802,9 +802,7 @@ def _generate_python_interface_class(cls_name: str,
         prop decls
         methods (overloaded methods)
     TODO handle c++ operators
-    TODO better code
-    TODO auto generate STL annotations
-    TODO insert docstring if exists
+    TODO better codegenerat
     """
     imports = []  # type: List[str]
     # split decl to method decl and prop decl
@@ -929,7 +927,9 @@ def _generate_python_interface_class(cls_name: str,
     class_def_string = "class {}:".format(cls_name)
     if parent_class_name:
         class_def_string = "class {}({}):".format(cls_name, parent_class_name)
-        imports.append("from {} import {}".format(parent_import_ns, parent_class_name))
+        if parent_import_ns:
+            imports.append("from {} import {}".format(parent_import_ns, parent_class_name))
+    
     class_block = Block(class_def_string, decl_codes)
     return class_block, imports
 
@@ -1125,6 +1125,8 @@ class Pybind11SplitMain(ParameterizedClass):
                 parent_ns = ".".join(parent_name_splits[:-1])
                 parent_import_ns = "." * num_level + parent_ns
                 parent_class_name = parent_name_splits[-1]
+                if origin_cu.namespace == parent_ns:
+                    parent_import_ns = ""
             class_block, cls_imports = _generate_python_interface_class(
                 origin_cu.class_name, bind_cu.get_pybind_decls(),
                 origin_cu._enum_classes, exist_annos, parent_import_ns, parent_class_name)
