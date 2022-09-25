@@ -1,4 +1,8 @@
 # Changelog
+## [0.4.2] - 2022-09-25
+### Fixed
+* Fix dynamic decl problem.
+
 ## [0.4.1] - 2022-09-25
 ### Fixed
 * fix small bug in annotation gen.

@@ -2037,7 +2037,9 @@ class CodeGenerator(object):
             # construct unified dependency and assign namespace for Class
             if not cur_cu.graph_inited:
                 # extract deps in code object
-                for decl in self.cached_extract_classunit_methods(cur_cu):
+                decls_static = self.cached_extract_classunit_methods(cur_cu)
+                decl_dynamic = cur_cu._function_decls
+                for decl in decls_static + decl_dynamic:
                     code_obj = decl.code
                     # decl.meta.name
                     for dep_with_meta in code_obj._impl_only_deps:
@@ -2049,7 +2051,7 @@ class CodeGenerator(object):
                         dep_pcls, dep_subns = dep_with_meta.get_param_class_and_ns()
                         cur_cu.add_impl_only_param_class_by_name(
                             decl.get_function_name(), dep_subns, dep_pcls, dep_with_meta.alias)
-
+                
                 for dep_obj in cur_cu.get_class_deps():
                     cu_type = dep_obj.get_class_type()
                     if cu_type in cur_type_trace:
@@ -2082,8 +2084,7 @@ class CodeGenerator(object):
                         cur_type_trace_copy = cur_type_trace.copy()
                         cur_type_trace_copy.add(pcls)
                         stack.append((pcls, cur_type_trace_copy))
-                cur_cu._function_decls.extend(
-                    self.cached_extract_classunit_methods(cur_cu))
+                cur_cu._function_decls.extend(decls_static)
                 cur_cu._assign_overload_flag_to_func_decls()
                 cur_cu.graph_inited = True
             else:
