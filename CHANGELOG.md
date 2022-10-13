@@ -1,4 +1,8 @@
 # Changelog
+## [0.4.3] - 2022-10-13
+### Fixed
+* Fix some compiler don't support '~'.
+
 ## [0.4.2] - 2022-09-25
 ### Fixed
 * Fix dynamic decl problem.

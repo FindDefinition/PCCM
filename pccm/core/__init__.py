@@ -131,6 +131,8 @@ def _cpp_operator_name_conversion(name: str):
         raise NotImplementedError
     return name
 
+def _destructor_name_conversion(name: str, all_names: List[str]):
+    return name.replace("~", "pccm_destructor")
 
 class FunctionMeta(object):
     def __init__(self,
@@ -2417,7 +2419,9 @@ target_link_libraries({target_name} PRIVATE {' '.join(global_meta.libraries)})
                 assert func_name != cu_name
                 assert func_name is not None
                 func_name_for_file = _cpp_operator_name_conversion(func_name)
-
+            if isinstance(meta, DestructorMeta):
+                assert func_name is not None
+                func_name_for_file = _destructor_name_conversion(func_name, [])
             # if isinstance(meta, MemberFunctionMeta):
             header_only = meta.is_header_only() or code_obj.is_template(
             ) or global_header_only

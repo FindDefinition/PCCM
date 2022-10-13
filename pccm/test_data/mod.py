@@ -45,6 +45,10 @@ class Test3(pccm.Class):
         code.arg("val", "int")
         return code
 
+    @pccm.destructor
+    def dtor(self):
+        code = pccm.FunctionCode("return;")
+        return code
 
 class Test4(Test3):
     def __init__(self):
