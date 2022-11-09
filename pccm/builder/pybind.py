@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Union
-
+import os 
 import ccimport
 from ccimport.buildtools.writer import DEFAULT_MSVC_DEP_PREFIX, group_dict_by_split
 
@@ -8,6 +8,9 @@ from pccm.core import Class, CodeFormatter, CodeGenerator, ManualClassGenerator
 from pccm.core.buildmeta import BuildMeta
 from pccm.middlewares import expose_main, pybind
 
+from pccm.constants import PCCM_DISABLE_CODE_CHANGE
+
+_DISABLE_CODE_CHANGE = os.getenv(PCCM_DISABLE_CODE_CHANGE, "0") == "1"
 
 def build_pybind(cus: List[Class],
                  out_path: Union[str, Path],
@@ -60,9 +63,11 @@ def build_pybind(cus: List[Class],
         for k, v in impl_dict.items():
             print(k)
             print(v.to_string())
-    cg.code_written(HEADER_ROOT, header_dict, code_fmt)
-    paths, path_to_meta = cg.code_written_v2(SRC_ROOT, impl_dict, impl_to_meta,
-                                             code_fmt)
+    if not _DISABLE_CODE_CHANGE:
+        cg.code_written(HEADER_ROOT, header_dict, code_fmt)
+
+        paths, path_to_meta = cg.code_written_v2(SRC_ROOT, impl_dict, impl_to_meta,
+                                                code_fmt)
 
     pch_to_sources = {}  # type: Dict[Path, List[Path]]
     pch_to_include = {}  # type: Dict[Path, str]
@@ -85,9 +90,10 @@ def build_pybind(cus: List[Class],
         for k, v in impl_dict.items():
             print(k)
             print(v.to_string())
-    cg.code_written(HEADER_ROOT, header_dict, code_fmt)
-    pb_paths, pb_path_to_meta = cg.code_written_v2(SRC_ROOT, impl_dict,
-                                                   impl_to_meta, code_fmt)
+    if not _DISABLE_CODE_CHANGE:
+        cg.code_written(HEADER_ROOT, header_dict, code_fmt)
+        pb_paths, pb_path_to_meta = cg.code_written_v2(SRC_ROOT, impl_dict,
+                                                    impl_to_meta, code_fmt)
     path_to_meta.update(pb_path_to_meta)
     paths += pb_paths
     if not disable_anno:

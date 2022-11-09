@@ -1,5 +1,12 @@
 # Changelog
+## [0.4.4] - 2022-11-09
+### Added
+* Add PCCM_DISABLE_CODE_CHANGE to disable auto code override for debugging.
+
+
 ## [0.4.3] - 2022-10-13
+### Added
+* Add include path for pybind only code
 ### Fixed
 * Fix some compiler don't support '~'.
 

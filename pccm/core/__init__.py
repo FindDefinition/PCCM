@@ -188,12 +188,14 @@ class ClassMeta(object):
     def __init__(self,
                  name: Optional[str] = None,
                  skip_inherit: bool = False,
-                 mw_metas: Optional[List[Any]] = None):
+                 mw_metas: Optional[List[Any]] = None,
+                 python_inherit: Optional[Type["Class"]] = None):
         self.skip_inherit = skip_inherit
         self.name = name
         if mw_metas is None:
             mw_metas = []
         self.mw_metas = mw_metas
+        self.python_inherit = python_inherit
 
 
 def get_func_meta_except(func) -> FunctionMeta:
@@ -436,7 +438,7 @@ class EnumClass(object):
             if k in unique_key_set:
                 raise ValueError("your enum have duplicate key {}".format(k))
             unique_key_set.add(k)
-            assert isinstance(v, int), "v must be int."
+            assert isinstance(v, (int, str)), "v must be int."
             items.append("{} = {},".format(k, v))
         block = Block(prefix, items, "};")
         return "\n".join(generate_code(block, 0, 2))
@@ -978,7 +980,6 @@ class Class(object):
     TODO find a way to implement param class inherit.
     TODO add alias for non-param Class
     TODO add param class resume if class provide hash method
-    TODO support dynamic method
     TODO add convenient method to inherit base methods/typedefs/consts
     """
     def __init_subclass__(cls) -> None:
@@ -989,6 +990,7 @@ class Class(object):
         only works in python 3.6+, so we don't support inherit
         in python 3.5.
         """
+        # remove class meta appied from parent class
         if hasattr(cls, PCCM_CLASS_META_KEY):
             setattr(cls, PCCM_CLASS_META_KEY, None)
         cls.__init__ = _init_decorator(cls.__init__, cls)
@@ -998,6 +1000,11 @@ class Class(object):
         """get current Class Type during c++ constructing functions
         like add_member.
         """
+        cls_meta = get_class_meta(type(self))
+        if cls_meta is not None:
+            if cls_meta.python_inherit is not None:
+                assert issubclass(cls_meta.python_inherit, Class)
+                return cls_meta.python_inherit
         return getattr(self, PCCM_INIT_DECORATOR_KEY, None)
 
     def set_this_class_type(self, this_cls_type: Type["Class"]):
@@ -1523,6 +1530,11 @@ class Class(object):
         """
         if type(self) is Class:
             return None
+        cls_meta = get_class_meta(type(self))
+        if cls_meta is not None:
+            if cls_meta.python_inherit is not None:
+                # don't support c++ inherit when use python inherit
+                return None 
         pccm_base_types = []  # List[Type[Class]]
         candidates = list(type(self).__bases__)
         while candidates:
@@ -2137,7 +2149,12 @@ class CodeGenerator(object):
     def cached_get_cu_members(self, cu: Class):
         cu_type = type(cu)
         if cu_type not in self._get_members_cache:
-            self._get_members_cache[cu_type] = get_members(cu)
+            cls_meta = get_class_meta(type(self)) 
+            if cls_meta is not None:
+                members = get_members(cu, python_inherit=cls_meta.python_inherit)
+            else:
+                members = get_members(cu)
+            self._get_members_cache[cu_type] = members
         return self._get_members_cache[cu_type]
 
     def cached_extract_classunit_methods(self, cu: Class):

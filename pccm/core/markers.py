@@ -217,3 +217,10 @@ def skip_inherit(cls=None):
     """
     meta = ClassMeta(skip_inherit=True)
     return class_meta_decorator(cls, meta)
+
+
+def python_inherit(cls=None, inherit=None):
+    """use this decorator when you want to add a python inherit.
+    """
+    meta = ClassMeta(python_inherit=inherit)
+    return class_meta_decorator(cls, meta)

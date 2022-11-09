@@ -399,6 +399,12 @@ class Pybind11ClassMwMeta(Pybind11Meta):
         super().__init__(Pybind11SplitImpl)
         self.raw_code = raw_code
 
+class Pybind11ClassMwBuildMeta(Pybind11Meta):
+    """may add some attributes in future.
+    """
+    def __init__(self, includes: List[str]):
+        super().__init__(Pybind11SplitImpl)
+        self.includes = includes
 
 class Pybind11BindMethodMeta(Pybind11Meta):
     """may add some attributes in future.
@@ -581,6 +587,11 @@ class PybindClassMixin:
         code = FunctionCode()
         code.raw(content)
         self.add_local_class_middleware_meta(Pybind11ClassMwMeta(code))
+        return
+
+    def add_include_for_pybind(self: "Class",
+                          *inc: str):
+        self.add_local_class_middleware_meta(Pybind11ClassMwBuildMeta([*inc]))
         return
 
 def _postprocess_class(cls_name: str,
@@ -978,9 +989,12 @@ class Pybind11SingleClassHandler(ManualClass):
             PybindPropDecl(member_decl, cu.namespace, cu.class_name, mw_meta))
 
     def handle_class_meta(self, cu: Class, mw_meta: Pybind11ClassMwMeta):
-        assert cu.namespace is not None
-        if mw_meta.raw_code is not None:
-            self.raw_defs.append(mw_meta.raw_code)
+        if isinstance(mw_meta, Pybind11ClassMwBuildMeta):
+            self.add_include(*mw_meta.includes)
+        else:
+            assert cu.namespace is not None
+            if mw_meta.raw_code is not None:
+                self.raw_defs.append(mw_meta.raw_code)
 
     def postprocess(self, parent_is_pybind: bool = False):
         if self.built:

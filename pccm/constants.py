@@ -9,3 +9,4 @@ PCCM_INIT_DECORATOR_KEY = "__pccm_this_type"
 
 PCCM_INLINE_LIBRARY_PATH = Path.home() / ".pccm" / "inline"
 
+PCCM_DISABLE_CODE_CHANGE = "PCCM_DISABLE_CODE_CHANGE"
