@@ -497,6 +497,8 @@ class FunctionCode(object):
         self._template_arguments = [
         ]  # type: List[Union[TemplateTypeArgument, TemplateNonTypeArgument]]
         self._blocks = [Block("", [], indent=0)]  # type: List[Block]
+        self._blocks_capture: Optional[List[Block]] = None
+
         self.raw(code)
         self.ret_doc = None  # type: Optional[str]
         self.ret_pyanno = None  # type: Optional[str]
@@ -528,6 +530,8 @@ class FunctionCode(object):
 
     def raw(self, code: str):
         self._blocks[-1].body.append(_clean_code(code))
+        if self._blocks_capture is not None:
+            self._blocks_capture[-1].body.append(_clean_code(code))
         return self
 
     def add_dependency(self,
@@ -564,16 +568,26 @@ class FunctionCode(object):
     @contextlib.contextmanager
     def block(self, prefix: str, start: str = "{", end: str = "}"):
         self._blocks.append(Block(prefix + start, [], end))
+        if self._blocks_capture is not None:
+            self._blocks_capture.append(Block(prefix + start, [], end))
         yield
         last_block = self._blocks.pop()
         self._blocks[-1].body.append(last_block)
+        if self._blocks_capture is not None:
+            last_block = self._blocks_capture.pop()
+            self._blocks_capture[-1].body.append(last_block)
 
     @contextlib.contextmanager
     def macro_block(self, prefix: str):
         self._blocks.append(Block(prefix, []))
+        if self._blocks_capture is not None:
+            self._blocks_capture.append(Block(prefix, []))
         yield
         last_block = self._blocks.pop()
         self._blocks[-1].body.append(last_block)
+        if self._blocks_capture is not None:
+            last_block = self._blocks_capture.pop()
+            self._blocks_capture[-1].body.append(last_block)
 
     @contextlib.contextmanager
     def for_(self, for_stmt: str, prefix: str = ""):
@@ -628,6 +642,15 @@ class FunctionCode(object):
 
     def macro_endif_(self):
         self.raw("#endif")
+
+    @contextlib.contextmanager
+    def capture_to_new_code(self, code: "FunctionCode"):
+        blocks_bkp = self._blocks_capture
+        self._blocks_capture = code._blocks
+        try:
+            yield 
+        finally:
+            self._blocks_capture = blocks_bkp
 
     def unpack(self, args: list) -> str:
         return ", ".join(map(str, args))

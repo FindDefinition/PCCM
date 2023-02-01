@@ -1,4 +1,5 @@
 import ast
+import contextlib
 import inspect
 import json
 import os
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import pccm
+from pccm.core.funccode import Argument
 import portalocker
 from ccimport import loader, source_iter
 from pccm.builder import build_pybind
@@ -23,12 +25,12 @@ from pccm.middlewares.pybind import Pybind11MethodMeta
 from pccm.source.core import Replace, Source, execute_modifiers
 from pccm.utils import UniqueNamePool, get_qualname_of_type
 
-PCCM_INLINE_MODULE_NAME = "inline_module"
-PCCM_INLINE_FUNCTION_NAME = "inline_function"
-PCCM_INLINE_INNER_FUNCTION_NAME = "inline_inner_function" # usually cuda global function
+PCCM_INLINE_MODULE_NAME = "__pccm_inline_module"
+PCCM_INLINE_FUNCTION_NAME = "__pccm_inline_function"
+PCCM_INLINE_INNER_FUNCTION_NAME = "__pccm_inline_inner_function" # usually cuda global function
 
-PCCM_INLINE_NAMESPACE = "inline_namespace"
-PCCM_INLINE_CLASS_NAME = "InlineClass"
+PCCM_INLINE_NAMESPACE = "__pccm_inline_namespace"
+PCCM_INLINE_CLASS_NAME = "__pccm_InlineClass"
 
 
 def gcs(*instances):
@@ -52,9 +54,83 @@ def get_base_type_string(obj):
     else:
         return get_qualname_of_type(type(obj)), True
 
+def _get_captures_in_code(code_str: str):
+    it = source_iter.CppSourceIterator(code_str)
+    # hold ranges for further replace
+    all_captures: List[CaptureStmt] = []
+    unique_name: Dict[str, CaptureStmt] = {}
+    for pose in it.get_symbol_poses("$"):
+        it.move(pose + 1)
+        next_round = it.next_round()
+        if next_round is not None:
+            cap_name = it.source[next_round[0] +
+                                    1:next_round[1]].strip()
+            rep_range = (pose, next_round[1] + 1)
+            sym_range = (next_round[0] + 1, next_round[1])
+            is_expr = True
+        else:
+            iden = it.next_identifier()
+            assert iden is not None, "you can't use $ without a identifier."
+            rep_range = (pose, iden.end)
+            cap_name = iden.name.strip()
+            sym_range = (pose + 1, iden.end)
+            is_expr = False
+
+        if cap_name in unique_name:
+            cap = unique_name[cap_name]
+            cap.replace_range_pairs.append(rep_range)
+        else:
+            all_captures.append(
+                CaptureStmt(cap_name, is_expr, sym_range,
+                            [rep_range]))
+            unique_name[all_captures[-1].name] = all_captures[-1]
+    return all_captures
 
 class MultiTypeKindError(Exception):
     pass
+
+class PreCaptureFunctionCode(FunctionCode):
+    def __init__(self, code: str = "", arguments: Optional[List[Argument]] = None, return_type: str = "void", ctor_inits: Optional[List[Tuple[str, str]]] = None):
+        super().__init__(code, arguments, return_type, ctor_inits)
+        self._pre_capture_map: Dict[str, Any] = {}
+
+    @contextlib.contextmanager
+    def capture_vars(self, *,_frame_cnt: int = 2):
+        cur_frame = inspect.currentframe()
+        assert cur_frame is not None
+        frame = cur_frame
+        while _frame_cnt > 0:
+            frame = cur_frame.f_back
+            assert frame is not None
+            cur_frame = frame
+            _frame_cnt -= 1
+        # del frame
+        local_vars = cur_frame.f_locals.copy()
+        code_for_inspect = pccm.FunctionCode()
+        with self.capture_to_new_code(code_for_inspect):
+            yield
+        code_str = code_for_inspect.inspect_body()
+        all_captures = _get_captures_in_code(code_str)
+        
+        for cap in all_captures:
+            if not cap.is_expr:
+                if cap.name not in local_vars:
+                    raise ValueError(
+                        f"can't find your capture {cap.name} in prev frame."
+                    )
+                obj = local_vars[cap.name]
+            else:
+                for cap_name in cap.expr_names:
+                    if cap_name not in local_vars:
+                        raise ValueError(
+                            f"can't find your capture {cap_name} in prev frame."
+                        )
+                # eval expr in prev frame
+                obj = eval(cap.name, local_vars)
+            if cap.name not in self._pre_capture_map:
+                self._pre_capture_map[cap.name] = obj
+            else:
+                assert self._pre_capture_map[cap.name] is obj, "you capture different object with same capture expr"
 
 
 class InlineBuilderPlugin:
@@ -404,7 +480,7 @@ class InlineBuilder:
 
     def inline(self,
                name: str,
-               code: Union[str, FunctionCode],
+               code: Union[str, FunctionCode, PreCaptureFunctionCode],
                impl_file_suffix=".cc",
                additional_vars: Optional[Dict[str, Any]] = None,
                *,
@@ -423,6 +499,9 @@ class InlineBuilder:
             code_str = code.inspect_body()
         else:
             code_str = code
+        pre_capture_map: Dict[str, Any] = {}
+        if isinstance(code, PreCaptureFunctionCode):
+            pre_capture_map = code._pre_capture_map
         if additional_vars is None:
             additional_vars = {}
         cur_frame = inspect.currentframe()
@@ -452,37 +531,8 @@ class InlineBuilder:
                 exist = False
             if not exist:
                 # 1. extract captured vars
-                it = source_iter.CppSourceIterator(code_str)
-                # hold ranges for further replace
-                all_captures: List[CaptureStmt] = []
-                unique_name: Dict[str, CaptureStmt] = {}
-                for pose in it.get_symbol_poses("$"):
-                    it.move(pose + 1)
-                    next_round = it.next_round()
-                    if next_round is not None:
-                        cap_name = it.source[next_round[0] +
-                                             1:next_round[1]].strip()
-                        rep_range = (pose, next_round[1] + 1)
-                        sym_range = (next_round[0] + 1, next_round[1])
-                        is_expr = True
-                    else:
-                        iden = it.next_identifier()
-                        assert iden is not None, "you can't use $ without a identifier."
-                        rep_range = (pose, iden.end)
-                        cap_name = iden.name.strip()
-                        sym_range = (pose + 1, iden.end)
-                        is_expr = False
-
-                    if cap_name in unique_name:
-                        cap = unique_name[cap_name]
-                        cap.replace_range_pairs.append(rep_range)
-                    else:
-                        all_captures.append(
-                            CaptureStmt(cap_name, is_expr, sym_range,
-                                        [rep_range]))
-                        unique_name[all_captures[-1].name] = all_captures[-1]
+                all_captures = _get_captures_in_code(code_str)
                 # 2. find captures in prev frame
-
                 container_fcode = FunctionCode()
                 inner_fcode = FunctionCode()
                 # 3. inference c++ types
@@ -491,21 +541,24 @@ class InlineBuilder:
                 replaces: List[Replace] = []
                 capture_bts: List[BaseType] = []
                 for cap in all_captures:
-                    if not cap.is_expr:
-                        if cap.name not in local_vars:
-                            raise ValueError(
-                                f"can't find your capture {cap.name} in prev frame."
-                            )
-                        obj = local_vars[cap.name]
-                        arg_name = cap.name
+                    if cap.name in pre_capture_map:
+                        obj = pre_capture_map[cap.name]
                     else:
-                        for cap_name in cap.expr_names:
-                            if cap_name not in local_vars:
+                        if not cap.is_expr:
+                            if cap.name not in local_vars:
                                 raise ValueError(
-                                    f"can't find your capture {cap_name} in prev frame."
+                                    f"can't find your capture {cap.name} in prev frame."
                                 )
-                        # eval expr in prev frame
-                        obj = eval(cap.name, local_vars)
+                            obj = local_vars[cap.name]
+                            # arg_name = cap.name
+                        else:
+                            for cap_name in cap.expr_names:
+                                if cap_name not in local_vars:
+                                    raise ValueError(
+                                        f"can't find your capture {cap_name} in prev frame."
+                                    )
+                            # eval expr in prev frame
+                            obj = eval(cap.name, local_vars)
                     # apply non-anonymous vars (expr are anonymous vars)
                     try:
                         cpp_type, mapped_cpp_type = nested_type_analysis(
@@ -643,19 +696,22 @@ class InlineBuilder:
         all_base_types = module_meta.capture_ctypes
         args = []
         for cap, bt in zip(all_captures, all_base_types):
-            if not cap.is_expr:
-                if cap.name not in local_vars:
-                    raise ValueError(
-                        f"can't find your capture {cap.name} in prev frame.")
-                obj = local_vars[cap.name]
+            if cap.name in pre_capture_map:
+                obj = pre_capture_map[cap.name]
             else:
-                for cap_name in cap.expr_names:
-                    if cap_name not in local_vars:
+                if not cap.is_expr:
+                    if cap.name not in local_vars:
                         raise ValueError(
-                            f"can't find your capture {cap_name} in prev frame."
-                        )
-                # eval expr in prev frame
-                obj = eval(cap.name, local_vars)
+                            f"can't find your capture {cap.name} in prev frame.")
+                    obj = local_vars[cap.name]
+                else:
+                    for cap_name in cap.expr_names:
+                        if cap_name not in local_vars:
+                            raise ValueError(
+                                f"can't find your capture {cap_name} in prev frame."
+                            )
+                    # eval expr in prev frame
+                    obj = eval(cap.name, local_vars)
             obj = _nested_apply_plugin_transform(bt, obj, self.plugins, user_arg)
             args.append(obj)
         for v in additional_vars.values():
