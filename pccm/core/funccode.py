@@ -6,7 +6,7 @@ class Argument(object):
                  name: str,
                  type: str,
                  default: Optional[str] = None,
-                 array: Optional[str] = None,
+                 array: Optional[Union[int, str]] = None,
                  pyanno: Optional[str] = None,
                  doc: Optional[str] = None,
                  attrs: Optional[List[Attr]] = None):

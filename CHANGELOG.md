@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.6] - 2023-02-06
+### Added 
+* Add support for complex inliner and cpu inliner
+
 ## [0.4.5] - 2023-02-01
 ### Added 
 * Add better capture support for inliner.

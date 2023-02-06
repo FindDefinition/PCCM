@@ -591,6 +591,9 @@ class PybindClassMixin:
 
     def add_include_for_pybind(self: "Class",
                           *inc: str):
+        """if you have custom pybind convertor, you should use this
+        to include them in generated pybind code.
+        """
         self.add_local_class_middleware_meta(Pybind11ClassMwBuildMeta([*inc]))
         return
 

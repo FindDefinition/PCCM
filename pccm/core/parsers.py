@@ -353,9 +353,10 @@ class CppType:
         return hash(other) == hash(self)
 
 class BaseType:
-    def __init__(self, name: QualifiedId, args: List[CppType]) -> None:
+    def __init__(self, name: QualifiedId, args: List[CppType], count: Optional[int] = None) -> None:
         self.name = name
         self.args = args
+        self.count = count
 
         self._is_std_type: Optional[bool] = None
 

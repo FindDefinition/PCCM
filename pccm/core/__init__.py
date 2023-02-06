@@ -449,7 +449,7 @@ class Member(Argument):
                  name: str,
                  type: str,
                  default: Optional[str] = None,
-                 array: Optional[str] = None,
+                 array: Optional[Union[int, str]] = None,
                  pyanno: Optional[str] = None,
                  mw_metas: Optional[List[MiddlewareMeta]] = None,
                  doc: Optional[str] = None):
@@ -473,12 +473,17 @@ class Member(Argument):
                 return "{}{} {} = {};".format(doc, self.type_str, self.name,
                                               self.default)
         else:
+            
+            if isinstance(self.array, int):
+                array_str = f"[{self.array}]"
+            else:
+                array_str = self.array
             if self.default is None:
                 return "{}{} {}{};".format(doc, self.type_str, self.name,
-                                           self.array)
+                                           array_str)
             else:
                 return "{}{} {}{} = {};".format(doc, self.type_str, self.name,
-                                                self.array, self.default)
+                                                array_str, self.default)
 
 
 class FunctionCode(object):
@@ -760,6 +765,12 @@ class FunctionCode(object):
         arg_strs = []  # type: List[str]
         for arg in self.arguments:
             arg_fmt = "{type} {name}".format(type=arg.type_str, name=arg.name)
+            if arg.array is not None:
+                if isinstance(arg.array, int):
+                    array_str = f"[{arg.array}]"
+                else:
+                    array_str = arg.array
+                arg_fmt += array_str
             if arg.default and header_only:
                 arg_fmt += " = {}".format(arg.default)
             arg_strs.append(arg_fmt)
@@ -792,7 +803,8 @@ class FunctionCode(object):
             name: str,
             type: str,
             default: Optional[str] = None,
-            pyanno: Optional[str] = None):
+            pyanno: Optional[str] = None,
+            array: Optional[Union[int, str]] = None):
         """add a argument.
         """
         type = str(type).strip()
@@ -803,7 +815,7 @@ class FunctionCode(object):
                 if not part.strip():
                     raise ValueError("you provide a empty name in", name)
                 args.append(
-                    Argument(part.strip(), type, default, pyanno=pyanno))
+                    Argument(part.strip(), type, default, pyanno=pyanno, array=array))
         else:
             arg_attrs = arg_parser(name)
             for arg_with_attr in arg_attrs:
@@ -814,7 +826,7 @@ class FunctionCode(object):
                              type,
                              default,
                              pyanno=pyanno,
-                             attrs=arg_with_attr.attrs))
+                             attrs=arg_with_attr.attrs, array=array))
         if type not in self._type_to_hook:
             hook = _get_attr_hook(type)
             if hook is not None:
