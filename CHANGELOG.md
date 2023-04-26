@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.7] - 2023-04-07
+### Added 
+* Add function for inliner code inspect
+* add a option to faster check whether perform reload
+### Fixed 
+* fix pre-capture small bug
+
 ## [0.4.6] - 2023-02-06
 ### Added 
 * Add support for complex inliner and cpu inliner

@@ -59,17 +59,17 @@ def _get_attr_hook(type_str: str):
 
 def _clean_code(code: str):
     lines = code.split("\n")
-    # filter empty lines
-    lines = list(filter(lambda x: len(x.strip()) > 0, lines))
-    if not lines:
-        return ""
-    min_indent = max(len(l) for l in lines)
+    new_lines = []
+    min_indent = len(code)
     for l in lines:
-        for i in range(len(l)):
-            if l[i] != " ":
-                min_indent = min(min_indent, i)
-                break
-    return "\n".join(l[min_indent:] for l in lines)
+        l_strip = l.strip()
+        if not l_strip:
+            continue 
+        l_lstrip = l.lstrip()
+        min_indent = min(min_indent, len(l) - len(l_lstrip))
+        new_lines.append(l)
+
+    return "\n".join(l[min_indent:] for l in new_lines)
 
 
 _CPP_OPERATOR_ENC = {
@@ -1311,9 +1311,9 @@ class Class(object):
 
     @property
     def uid(self) -> Optional[str]:
-        if self.namespace is None:
+        if self._namespace is None:
             return None
-        return "{}-{}".format(self.namespace, self.class_name)
+        return f"{self._namespace}-{self.class_name}"
 
     @property
     def camelcase_uid(self):
@@ -2387,14 +2387,16 @@ target_link_libraries({target_name} PRIVATE {' '.join(global_meta.libraries)})
     def code_written(self,
                      root: Union[str, Path],
                      code_dict: Dict[str, CodeSection],
-                     code_fmt: Optional[CodeFormatter] = None):
-        return self.code_written_v2(root, code_dict, {}, code_fmt)[0]
+                     code_fmt: Optional[CodeFormatter] = None,
+                     write_code: bool = True):
+        return self.code_written_v2(root, code_dict, {}, code_fmt, write_code)[0]
 
     def code_written_v2(self,
                      root: Union[str, Path],
                      code_dict: Dict[str, CodeSection],
                      build_meta_dict: Dict[str, BuildMeta],
-                     code_fmt: Optional[CodeFormatter] = None):
+                     code_fmt: Optional[CodeFormatter] = None,
+                     write_code: bool = True):
         # TODO insert md5 to code to detect manual code change
         root_path = Path(root)
         all_paths = []  # type: List[Path]
@@ -2406,28 +2408,29 @@ target_link_libraries({target_name} PRIVATE {' '.join(global_meta.libraries)})
             code_path = root_path / k
             if k in build_meta_dict:
                 path_to_meta[code_path] = build_meta_dict[k]
-            if code_path.exists():
-                # read first, if same, don't write to keep file state.
-                with code_path.open("r") as f:
-                    code = f.read()
-                if code.strip() == code_to_write.strip():
-                    all_paths.append(code_path)
-                    continue
-                if self.verbose:
-                    code_to_write_lines = code_to_write.strip().split("\n")
-                    code_old_lines = code.strip().split("\n")
-                    diff = difflib.unified_diff(code_old_lines,
-                                                code_to_write_lines)
-                    print(f"--- {code_path} ---")
-                    print("\n".join(diff))
-            code_path.parent.mkdir(0o755, exist_ok=True, parents=True)
-            with code_path.open("w") as f:
-                f.write(code_to_write)
+            if write_code:
+                if code_path.exists():
+                    # read first, if same, don't write to keep file state.
+                    with code_path.open("r") as f:
+                        code = f.read()
+                    if code.strip() == code_to_write.strip():
+                        all_paths.append(code_path)
+                        continue
+                    if self.verbose:
+                        code_to_write_lines = code_to_write.strip().split("\n")
+                        code_old_lines = code.strip().split("\n")
+                        diff = difflib.unified_diff(code_old_lines,
+                                                    code_to_write_lines)
+                        print(f"--- {code_path} ---")
+                        print("\n".join(diff))
+                code_path.parent.mkdir(0o755, exist_ok=True, parents=True)
+                with code_path.open("w") as f:
+                    f.write(code_to_write)
             all_paths.append(code_path)
         return all_paths, path_to_meta
 
-    def generate_cu_code_v2(self,
-                            cu: Class,
+    @staticmethod
+    def generate_cu_code_v2(cu: Class,
                             one_impl_one_file: bool = True,
                             include_root: Optional[Path] = None,
                             global_header_only: bool = False):

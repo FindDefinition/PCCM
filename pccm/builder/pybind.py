@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union
 import os 
 import ccimport
+import time 
 from ccimport.buildtools.writer import DEFAULT_MSVC_DEP_PREFIX, group_dict_by_split
 
 from pccm.core import Class, CodeFormatter, CodeGenerator, ManualClassGenerator
@@ -117,7 +118,7 @@ def build_pybind(cus: List[Class],
             with pyi_path.open("w") as f:
                 f.write(v)
 
-    return ccimport.ccimport(
+    res = ccimport.ccimport(
         paths,
         out_path,
         build_meta,
@@ -135,7 +136,7 @@ def build_pybind(cus: List[Class],
         objects_folder=objects_folder,
         source_meta={str(p): v
                      for p, v in path_to_meta.items()})
-
+    return res 
 
 def gen_cmake(target_name: str,
               cus: List[Class],
