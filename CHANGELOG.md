@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.8] - 2023-07-05
+### Added 
+* add extern c to cuda globals
+
 ## [0.4.7] - 2023-04-07
 ### Added 
 * Add function for inliner code inspect

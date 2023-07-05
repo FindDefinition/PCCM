@@ -48,6 +48,7 @@ def cuda_global_function(func=None,
                          impl_file_suffix: str = ".cu",
                          launch_bounds: Optional[Tuple[int, int]] = None,
                          header_only: Optional[bool] = None,
+                         extern_c: bool = False,
                          name=None):
     if attrs is None:
         attrs = []
@@ -64,7 +65,8 @@ def cuda_global_function(func=None,
                             impl_file_suffix=impl_file_suffix,
                             attrs=cuda_global_attrs,
                             header_only=header_only,
-                            is_global=True)
+                            is_global=True,
+                            extern_c=extern_c)
 
 
 def member_function(func=None,
@@ -154,6 +156,7 @@ def external_function(func=None,
                       impl_file_suffix: str = ".cu",
                       header_only: Optional[bool] = None,
                       is_global: bool = False,
+                      extern_c: bool = False,
                       name=None):
     if forceinline or inline:
         assert forceinline is not inline, "can't set both inline and forceinline"
@@ -177,7 +180,8 @@ def external_function(func=None,
                     macro_guard=macro_guard,
                     impl_loc=impl_loc,
                     impl_file_suffix=impl_file_suffix,
-                    header_only=header_only)
+                    header_only=header_only,
+                    extern_c=extern_c)
     return markers.meta_decorator(func, meta)
 
 

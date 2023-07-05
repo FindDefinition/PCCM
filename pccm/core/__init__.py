@@ -340,7 +340,8 @@ class StaticMemberFunctionMeta(FunctionMeta):
                  macro_guard: Optional[str] = None,
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc",
-                 header_only: Optional[bool] = None):
+                 header_only: Optional[bool] = None,
+                 extern_c: bool = False):
         super().__init__(inline=inline,
                          constexpr=constexpr,
                          attrs=attrs,
@@ -348,7 +349,8 @@ class StaticMemberFunctionMeta(FunctionMeta):
                          macro_guard=macro_guard,
                          impl_loc=impl_loc,
                          impl_file_suffix=impl_file_suffix,
-                         header_only=header_only)
+                         header_only=header_only,)
+        self.extern_c = extern_c
 
     def get_pre_attrs(self) -> List[str]:
         res = super().get_pre_attrs()  # type: List[str]
@@ -368,7 +370,8 @@ class ExternalFunctionMeta(FunctionMeta):
                  impl_loc: str = "",
                  impl_file_suffix: str = ".cc",
                  header_only: Optional[bool] = None,
-                 friend: bool = False):
+                 friend: bool = False,
+                 extern_c: bool = False):
         # TODO better handle friend method
         # currently we only support direct friend method
         # declaration.
@@ -381,9 +384,13 @@ class ExternalFunctionMeta(FunctionMeta):
                          impl_file_suffix=impl_file_suffix,
                          header_only=header_only,
                          friend=friend)
+        self.extern_c = extern_c
 
     def get_pre_attrs(self) -> List[str]:
-        res = super().get_pre_attrs()  # type: List[str]
+        res: List[str] = []
+        if self.extern_c:
+            res.append("extern \"C\"")
+        res.extend(super().get_pre_attrs())
         if self.friend:
             res.append("friend")
         return res
@@ -518,6 +525,8 @@ class FunctionCode(object):
         self._invalid = False
 
         self._type_to_hook: Dict[str, FuncArgAttrHandler] = {}
+
+        self.func_name_override: Optional[str] = None 
 
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0
@@ -2215,6 +2224,8 @@ class CodeGenerator(object):
                     continue
                 func_doc = inspect.getdoc(v)
                 code_obj.func_doc = func_doc
+                if code_obj.func_name_override is not None:
+                    meta.name = code_obj.func_name_override
                 methods.append(FunctionDecl(meta, code_obj))
         return methods
 
@@ -2289,7 +2300,8 @@ class CodeGenerator(object):
                         target_name: str,
                         cus: List[Union[Class, ParameterizedClass]],
                         include_root: Optional[Path] = None,
-                        cxx_standard="14"):
+                        cxx_standard="14",
+                        disable_cmake_default_arch: bool = False):
         header_dict = OrderedDict()  # type: Dict[str, CodeSectionHeader]
         impl_dict = OrderedDict()  # type: Dict[str, CodeSectionImpl]
         header_to_impls = OrderedDict()  # type: Dict[str, List[str]]
@@ -2349,6 +2361,11 @@ find_package(CUDAToolkit)
                     cflags_list_str = "\n".join(["    " + p for p in cflags_list])
                     cflags_stmt = (f"target_compile_options({cu_target_name} PRIVATE "
                     f"$<$<COMPILE_LANGUAGE:CXX>: \n{cflags_list_str}>)")
+                disable_cmake_default_arch_str = ""
+                if disable_cmake_default_arch:
+                    # this only works on cmake >= 3.24
+                    disable_cmake_default_arch_str = f"set_target_properties({cu_target_name} PROPERTIES CUDA_ARCHITECTURES OFF)"
+
                 cmake_static_libs.append(cu_target_name)
                 # TODO why POSITION_INDEPENDENT_CODE (add -dc to nvcc) not working on nvcc?
                 cmakecontents = f"""
@@ -2364,6 +2381,7 @@ target_include_directories({cu_target_name} PRIVATE
 {includes_str})
 {cuda_flags}
 {cflags_stmt}
+{disable_cmake_default_arch_str}
                 """
                 path_to_cmake_content[cmakepath] = cmakecontents
                 main_cmake_contents.append(f"add_subdirectory({str(Path(cmakepath).parent)})")
