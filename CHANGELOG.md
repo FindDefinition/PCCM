@@ -1,4 +1,7 @@
 # Changelog
+## [0.4.9] - 2023-10-17
+### Fixed 
+* fix missing includes and alias when use impl-only dep with header only
 
 ## [0.4.8] - 2023-07-05
 ### Added 

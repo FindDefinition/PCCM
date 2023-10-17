@@ -1753,23 +1753,30 @@ class CodeSectionHeader(CodeSection):
     """
     include
     namespace {
+        impl_only alias
         Classes
     }
     """
     def __init__(self, namespace: str, global_codes: List[str],
-                 includes: List[str], class_defs: List["CodeSectionClassDef"]):
+                 includes: List[str], class_defs: List["CodeSectionClassDef"], impl_only_aliases: Optional[List[str]] = None):
         self.namespace = namespace
         self.includes = includes
         self.class_defs = class_defs
         self.global_codes = global_codes
+        self.impl_only_aliases = impl_only_aliases
 
     def to_string(self) -> str:
         namespace_before, namespace_after = self.generate_namespace(
             self.namespace)
         ns_before = "\n".join(namespace_before)
         ns_after = "\n".join(namespace_after)
+        impl_only_alias = ""
         class_strs = [c.to_block() for c in self.class_defs
                       ]  # type: List[Union[Block, str]]
+        if self.impl_only_aliases is not None and len(self.impl_only_aliases) > 0:
+            impl_only_alias = "\n".join(self.impl_only_aliases)
+            class_strs.insert(0, impl_only_alias)
+
         # class_strs = list(filter(len, class_strs))
         block = Block("\n".join(["#pragma once"] + self.includes +
                                 self.global_codes + [ns_before]),
@@ -2575,6 +2582,7 @@ target_link_libraries({target_name} PRIVATE {' '.join(global_meta.libraries)})
                                 ctors_index_decl +
                                 static_functions_index_decl +
                                 dtors_index_decl + friend_global_func_decl)
+        impl_only_aliases_for_header_only: List[str] = []
         cls_funcs_with_index.sort(key=lambda x: x[0])
         cls_funcs = [c[1] for c in cls_funcs_with_index]
         code_cls_def = cu.get_code_class_def(cu_name, ext_functions_decl,
@@ -2605,6 +2613,15 @@ target_link_libraries({target_name} PRIVATE {' '.join(global_meta.libraries)})
                                             impl_dict_code_after_inc[k],
                                             impl_dict_code_in_ns[k])
                 impl_dict[k] = code_impl
+            else:
+                # check impl only deps for header only 
+                for dep in impl_only_deps[k]:
+                    includes.append("#include <{}>".format(
+                        dep.include_file))
+                    dep_stmt = cu.get_dependency_alias(dep)
+                    if dep_stmt:
+                        impl_only_aliases_for_header_only.append(dep_stmt)
+
         for k, (suffix, mains) in cu._impl_mains.items():
             impl_key = "{}/{}{}".format(cu.namespace.replace(".", "/"), k,
                                         suffix)
@@ -2614,7 +2631,7 @@ target_link_libraries({target_name} PRIVATE {' '.join(global_meta.libraries)})
             impl_dict[impl_key] = code_impl
 
         code_header = CodeSectionHeader(cu.namespace, cu._global_codes,
-                                        includes, code_cdefs)
+                                        includes, code_cdefs, impl_only_aliases_for_header_only)
         header_dict = {cu.include_file: code_header}
         # every cu have only one header with several impl files.
         return header_dict, impl_dict
