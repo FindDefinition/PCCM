@@ -1,4 +1,8 @@
 # Changelog
+## [0.4.10] - 2023-11-07
+### Fixed 
+* fix wrong enum typing
+
 ## [0.4.9] - 2023-10-17
 ### Fixed 
 * fix missing includes and alias when use impl-only dep with header only

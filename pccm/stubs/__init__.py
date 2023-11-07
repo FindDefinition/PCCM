@@ -1,5 +1,5 @@
 from typing import Literal, Optional, Union
-
+import enum 
 
 class EnumClassValue(object):
     def __init__(self, value: int):

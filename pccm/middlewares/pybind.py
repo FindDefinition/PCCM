@@ -922,15 +922,19 @@ def _generate_python_interface_class(cls_name: str,
     # Class EnumName:
     for ec in enum_classes:
         ec_items = []  # type: List[Union[Block, str]]
+        ec_enum_items = []  # type: List[Union[Block, str]]
+
         enum_type = "EnumValue"
         if ec.scoped:
             enum_type = "EnumClassValue"
 
-        prefix = "class {}:".format(ec.name)
+        prefix = "class {}(enum.Enum):".format(ec.name)
         for key, value in ec.items:
-            ec_items.append("{k} = {ectype}({v}) # type: {ectype}".format(
+            ec_items.append("{k} = {clsname}.{k}".format(
+                k=key, v=value, clsname=ec.name))
+            ec_enum_items.append("{k} = {v}".format(
                 k=key, v=value, ectype=enum_type))
-        def_items = ec_items.copy()
+        def_items = ec_enum_items.copy()
         def_items.append("@staticmethod")
         def_items.append(
             "def __members__() -> Dict[str, {}]: ...".format(enum_type))
@@ -1112,7 +1116,7 @@ class Pybind11SplitMain(ParameterizedClass):
         TODO insert docstring if exists
         """
         init_import = "from typing import overload, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union"
-        init_pccm_import = "from pccm.stubs import EnumValue, EnumClassValue"
+        init_pccm_import = "from pccm.stubs import EnumValue, EnumClassValue, enum"
         ns_to_interfaces = OrderedDict()  # type: Dict[str, List[Block]]
         ns_to_imports = OrderedDict()  # type: Dict[str, List[str]]
         ns_to_interface = OrderedDict()  # type: Dict[str, str]

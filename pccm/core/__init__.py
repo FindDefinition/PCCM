@@ -813,7 +813,8 @@ class FunctionCode(object):
             type: str,
             default: Optional[str] = None,
             pyanno: Optional[str] = None,
-            array: Optional[Union[int, str]] = None):
+            array: Optional[Union[int, str]] = None,
+            doc: Optional[str] = None):
         """add a argument.
         """
         type = str(type).strip()
@@ -824,7 +825,7 @@ class FunctionCode(object):
                 if not part.strip():
                     raise ValueError("you provide a empty name in", name)
                 args.append(
-                    Argument(part.strip(), type, default, pyanno=pyanno, array=array))
+                    Argument(part.strip(), type, default, pyanno=pyanno, array=array, doc=doc))
         else:
             arg_attrs = arg_parser(name)
             for arg_with_attr in arg_attrs:
@@ -835,7 +836,8 @@ class FunctionCode(object):
                              type,
                              default,
                              pyanno=pyanno,
-                             attrs=arg_with_attr.attrs, array=array))
+                             attrs=arg_with_attr.attrs, array=array,
+                             doc=doc))
         if type not in self._type_to_hook:
             hook = _get_attr_hook(type)
             if hook is not None:
@@ -1051,7 +1053,7 @@ class Class(object):
                 return cls_meta.python_inherit
         return getattr(self, PCCM_INIT_DECORATOR_KEY, None)
 
-    def set_this_class_type(self, this_cls_type: Type["Class"]):
+    def set_this_class_type(self, this_cls_type: Optional[Type["Class"]]):
         """get current Class Type during c++ constructing functions
         like add_member.
         """
