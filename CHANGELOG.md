@@ -1,4 +1,9 @@
 # Changelog
+## [0.4.11] - 2023-11-11
+### Fixed 
+* fix wrong version.txt
+
+
 ## [0.4.10] - 2023-11-07
 ### Fixed 
 * fix wrong enum typing
