@@ -4,6 +4,7 @@ import difflib
 import functools
 import inspect
 import re
+import sys
 import types
 from collections import OrderedDict, defaultdict, deque
 from pathlib import Path
@@ -1898,11 +1899,34 @@ def extract_module_id_of_class(
         import_parts = loader.try_capture_import_parts(path, None)
     return ".".join(import_parts)
 
+def _get_type_by_qname(mod: types.ModuleType, qname: str):
+    if not qname:
+        return None
+    parts = qname.split(".")
+    cur = mod
+    for part in parts:
+        if not hasattr(cur, part):
+            return None
+        cur = getattr(cur, part)
+    return cur
+
 
 class ParameterizedClass(Class):
     """special subclass of Class. this class isn't related to c++ template,
     so it's name isn't 'TemplateClass'
     """
+    def __init__(self):
+        super().__init__()
+        qname = type(self).__qualname__
+        mod = inspect.getmodule(self)
+        self._pccm_cls_instance_id = None 
+        self._pccm_module_qualname = None 
+        self._pccm_type_qualname = qname 
+
+        if mod is not None and qname is not None:
+            self._pccm_module_qualname = mod.__name__
+            if self._pccm_module_qualname is not None:
+                self._pccm_cls_instance_id = id(_get_type_by_qname(mod, qname))
 
 
 class ManualClass(ParameterizedClass):
@@ -2168,6 +2192,18 @@ class CodeGenerator(object):
                     else:
                         cur_type_trace_copy.add(udep.get_class_type())
                     stack.append((udep.cu, cur_type_trace_copy))
+                # reload methods if the module of cu (pcls) is reloaded
+                if isinstance(cur_cu, ParameterizedClass):
+                    if cur_cu._pccm_module_qualname is not None:
+                        cur_mod = sys.modules.get(cur_cu._pccm_module_qualname)
+                        if cur_mod is not None:
+                            cu_new_type = _get_type_by_qname(cur_mod, cur_cu._pccm_type_qualname)
+                            if cu_new_type is not None and cur_cu._pccm_cls_instance_id != id(cu_new_type):
+                                # module reloaded
+                                new_func_decls = self.cached_extract_classunit_methods(cur_cu, force_reload=True)
+                                for decl, new_decl in zip(cur_cu._function_decls, new_func_decls):
+                                    decl.code = new_decl.code
+                                cur_cu._pccm_cls_instance_id = id(cu_new_type)
         # make uid_to_cu reversed, i.e. from leaf-root to root-leaf
         # perform post-order here because we need to handle leaf nodes first in following process.
         uid_to_cu = self.postorder_sort(cus)
@@ -2210,12 +2246,12 @@ class CodeGenerator(object):
             self._get_members_cache[cu_type] = members
         return self._get_members_cache[cu_type]
 
-    def cached_extract_classunit_methods(self, cu: Class):
+    def cached_extract_classunit_methods(self, cu: Class, force_reload: bool = False):
         cu_type = type(cu)
         key = cu_type
         if isinstance(cu, ParameterizedClass):
             key = cu
-        if key not in self._get_decls_cache:
+        if key not in self._get_decls_cache or force_reload:
             self._get_decls_cache[key] = self.extract_classunit_methods(cu)
         return self._get_decls_cache[key]
 

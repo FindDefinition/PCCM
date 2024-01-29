@@ -3,6 +3,7 @@ import contextlib
 import inspect
 import json
 import os
+import re
 import threading
 import time
 from collections.abc import Mapping
@@ -24,9 +25,12 @@ from pccm.core.parsers import BaseType, CppType, DeclSpec, QualifiedId
 from pccm.middlewares.pybind import Pybind11MethodMeta
 from pccm.source.core import Replace, Source, execute_modifiers
 from pccm.utils import UniqueNamePool, get_qualname_of_type
+import difflib
 
 PCCM_INLINE_MODULE_NAME = "__pccm_inline_module"
 PCCM_INLINE_FUNCTION_NAME = "__pccm_inline_function"
+
+PCCM_INLINE_FUNCTION_NAME_FORMAT = "__pccm_inline_{}"
 PCCM_INLINE_INNER_FUNCTION_NAME = "__pccm_inline_inner_function"  # usually cuda global function
 
 PCCM_INLINE_ARG_PREFIX = "__pccm_arg"
@@ -98,12 +102,22 @@ class PreCaptureFunctionCode(FunctionCode):
                  code: str = "",
                  arguments: Optional[List[Argument]] = None,
                  return_type: str = "void",
-                 ctor_inits: Optional[List[Tuple[str, str]]] = None):
+                 ctor_inits: Optional[List[Tuple[str, str]]] = None,
+                 cached_capture_map: Optional[Dict[str, Any]] = None):
         super().__init__(code, arguments, return_type, ctor_inits)
+        self._cached_inited = cached_capture_map is not None
         self._pre_capture_map: Dict[str, Any] = {}
+        if cached_capture_map is not None:
+            self._pre_capture_map = cached_capture_map
+
+    def get_pre_capture_map(self):
+        return self._pre_capture_map
 
     @contextlib.contextmanager
     def capture_vars(self, *, _frame_cnt: int = 2):
+        if self._cached_inited:
+            yield
+            return 
         cur_frame = inspect.currentframe()
         assert cur_frame is not None
         frame = cur_frame
@@ -462,7 +476,8 @@ class InlineBuilder:
                  build_kwargs: Optional[Dict[str, Any]] = None,
                  param_deps: Optional[List[pccm.ParameterizedClass]] = None,
                  reload_when_code_change: bool = False,
-                 reload_compare_use_raw: bool = True) -> None:
+                 reload_compare_use_raw: bool = True,
+                 show_diff_when_reload: bool = False) -> None:
         self.deps = deps
         if param_deps is None:
             param_deps = []
@@ -489,6 +504,7 @@ class InlineBuilder:
         self.root = root
         self.build_root = build_root
         self._reload_when_code_change = reload_when_code_change
+        self.show_diff_when_reload = show_diff_when_reload
 
     def _find_exist_module_name(self, code: str, code_hash: str, root: Path):
         cur_dep_ids = self.dep_ids
@@ -529,6 +545,12 @@ class InlineBuilder:
 
         return None
 
+    def _get_inline_func_name_for_debug(self, name: str):
+        return PCCM_INLINE_FUNCTION_NAME_FORMAT.format(re.sub('[^0-9a-zA-Z]', '_', name))
+
+    def _get_debug_name(self, name: str):
+        return re.sub('[^0-9a-zA-Z]', '_', name)
+
     def build(self,
               pccm_cls: pccm.Class,
               mod_root: Path,
@@ -549,9 +571,9 @@ class InlineBuilder:
 
         return getattr(
             getattr(getattr(mod, PCCM_INLINE_NAMESPACE),
-                    PCCM_INLINE_CLASS_NAME), PCCM_INLINE_FUNCTION_NAME)
+                    PCCM_INLINE_CLASS_NAME), self._get_inline_func_name_for_debug(name))
 
-    def run_func(self, func, *args, user_args: Optional[Any] = None):
+    def run_func(self, name: str, func, *args, user_args: Optional[Any] = None):
         return func(*args)
 
     def get_base_class(self):
@@ -613,6 +635,9 @@ class InlineBuilder:
                     if unique_key in self.modules:
                         data = self.modules[unique_key]
                         exist = data.user_raw_code == code_str
+                        if not exist and self.show_diff_when_reload:
+                            print("---{name} reloaded---".format(name=name))
+                            print(name, "\n".join(difflib.unified_diff(data.user_raw_code.split("\n"), code_str.split("\n"))))
             if not exist:
                 # 1. extract captured vars
                 all_captures = _get_captures_in_code(code_str)
@@ -740,7 +765,7 @@ class InlineBuilder:
                                 args.append(obj)
                             for v in additional_vars.values():
                                 args.append(v)
-                            return self.run_func(func,
+                            return self.run_func(name, func,
                                                  *args,
                                                  user_args=user_arg)
                 if isinstance(code, FunctionCode):
@@ -757,7 +782,7 @@ class InlineBuilder:
                         impl_file_suffix=impl_file_suffix)
                     meta.mw_metas.append(Pybind11MethodMeta())
                 decl = FunctionDecl(meta, container_fcode)
-                decl.meta.name = PCCM_INLINE_FUNCTION_NAME
+                decl.meta.name = self._get_inline_func_name_for_debug(name)
                 # container_fcode_str = decl.inspect_impl()
                 # container_fcode_hash = hashlib.sha256(code_str.encode('utf-8')).hexdigest()
 
@@ -772,6 +797,10 @@ class InlineBuilder:
                     for dep in code._impl_only_deps:
                         pccm_class.add_impl_only_dependency_by_name(
                             decl.meta.name, dep.get_class_type())
+                    for dep in code._impl_only_pdeps:
+                        dep_pcls, dep_subns = dep.get_param_class_and_ns()
+                        pccm_class.add_impl_only_param_class_by_name(
+                            decl.meta.name, dep_subns, dep_pcls, dep.alias)
 
                 if inner_decl is not None:
                     inner_decl.meta.name = PCCM_INLINE_INNER_FUNCTION_NAME
@@ -799,7 +828,7 @@ class InlineBuilder:
                 func = self.build(pccm_class, mod_root, name, timeout,
                                   user_arg)
                 if not disable_cache:
-                    code_for_inspect = "\n".join(pccm.core.generate_code(container_fcode.get_impl(PCCM_INLINE_FUNCTION_NAME, meta), 0, 2))
+                    code_for_inspect = "\n".join(pccm.core.generate_code(container_fcode.get_impl(self._get_inline_func_name_for_debug(name), meta), 0, 2))
                     module_meta = _ModuleMeta(func, all_captures, capture_bts,
                                               inner_code_str, code_for_inspect,
                                               code_str)
@@ -808,7 +837,7 @@ class InlineBuilder:
                     # self.cached_capture_ctypes[unique_key] = capture_bts
                     self.used_names.add(key)
                     # breakpoint()
-                return self.run_func(func, *args, user_args=user_arg)
+                return self.run_func(name, func, *args, user_args=user_arg)
 
         # module already loaded. just run it after transform.
         module_meta = self.modules[unique_key]
@@ -839,7 +868,7 @@ class InlineBuilder:
             args.append(obj)
         for v in additional_vars.values():
             args.append(v)
-        return self.run_func(func, *args, user_args=user_arg)
+        return self.run_func(name, func, *args, user_args=user_arg)
 
     def search_codes_by_name(self, name: str):
         res: List[str] = []

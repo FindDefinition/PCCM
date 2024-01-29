@@ -1,4 +1,8 @@
 # Changelog
+## [0.4.12] - 2024-01-03
+### Added
+- add support for param class reload by check id in `sys.module`
+
 ## [0.4.11] - 2023-11-11
 ### Fixed 
 * fix wrong version.txt
