@@ -516,8 +516,12 @@ class FunctionCode(object):
         self.ret_doc = None  # type: Optional[str]
         self.ret_pyanno = None  # type: Optional[str]
         self.func_doc = None  # type: Optional[str]
+        self.code_before_include = None  # type: Optional[str]
         self.code_after_include = None  # type: Optional[str]
         self.code_in_ns = None  # type: Optional[str]
+
+        # for metal kernel global constants
+        self.code_before_func_def = None  # type: Optional[str]
 
         self._additional_pre_attrs = []  # type: List[str]
 
@@ -721,6 +725,8 @@ class FunctionCode(object):
         arg_strs = []  # type: List[str]
         for arg in self.arguments:
             arg_fmt = "{type} {name}".format(type=arg.type_str, name=arg.name)
+            if arg.attributes is not None:
+                arg_fmt += "[[" + " ".join(arg.attributes) + "]]"
             if arg.default:
                 arg_fmt += " = {}".format(arg.default)
             arg_strs.append(arg_fmt)
@@ -740,6 +746,7 @@ class FunctionCode(object):
 
     def get_impl(self, name: str, meta: FunctionMeta, class_name: str = ""):
         """
+        code_before_func_def
         template <args>
         pre_attrs ret_type BoundClass::name(args) post_attrs {body};
         """
@@ -781,6 +788,8 @@ class FunctionCode(object):
                 else:
                     array_str = arg.array
                 arg_fmt += array_str
+            if arg.attributes is not None:
+                arg_fmt += "[[" + " ".join(arg.attributes) + "]]"
             if arg.default and header_only:
                 arg_fmt += " = {}".format(arg.default)
             arg_strs.append(arg_fmt)
@@ -795,6 +804,8 @@ class FunctionCode(object):
             prefix_fmt = pre_attrs_str + " " + prefix_fmt
         blocks = []  # List[Union[Block, str]]
         blocks.extend(self._blocks)
+        if self.code_before_func_def is not None:
+            template_fmt = self.code_before_func_def + "\n" + template_fmt
         block = Block(template_fmt + prefix_fmt, blocks, "}")
         if meta.macro_guard is not None:
             block = Block("#if {}".format(meta.macro_guard), [block], "#endif")
@@ -815,7 +826,9 @@ class FunctionCode(object):
             default: Optional[str] = None,
             pyanno: Optional[str] = None,
             array: Optional[Union[int, str]] = None,
-            doc: Optional[str] = None):
+            doc: Optional[str] = None,
+            attributes: Optional[List[str]] = None,
+            userdata: Any = None):
         """add a argument.
         """
         type = str(type).strip()
@@ -826,7 +839,8 @@ class FunctionCode(object):
                 if not part.strip():
                     raise ValueError("you provide a empty name in", name)
                 args.append(
-                    Argument(part.strip(), type, default, pyanno=pyanno, array=array, doc=doc))
+                    Argument(part.strip(), type, default, pyanno=pyanno, array=array, doc=doc, 
+                            attributes=attributes, userdata=userdata))
         else:
             arg_attrs = arg_parser(name)
             for arg_with_attr in arg_attrs:
@@ -837,8 +851,10 @@ class FunctionCode(object):
                              type,
                              default,
                              pyanno=pyanno,
-                             attrs=arg_with_attr.attrs, array=array,
-                             doc=doc))
+                             user_attrs=arg_with_attr.attrs, array=array,
+                             doc=doc,
+                             attributes=attributes,
+                             userdata=userdata))
         if type not in self._type_to_hook:
             hook = _get_attr_hook(type)
             if hook is not None:

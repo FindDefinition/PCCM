@@ -1,4 +1,8 @@
 # Changelog
+## [0.4.13] - 2024-07-27
+### Added
+- add attributes and `code_before_func_def` support for apple metal
+
 ## [0.4.12] - 2024-01-03
 ### Added
 - add support for param class reload by check id in `sys.module`

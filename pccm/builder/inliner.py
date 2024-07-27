@@ -717,8 +717,9 @@ class InlineBuilder:
 
                     container_fcode.arg(arg_name,
                                         mapped_cpp_type_str,
-                                        array=mapped_cpp_type.count)
-                    inner_fcode.arg(cap.replaced_name, inner_cpp_type)
+                                        array=mapped_cpp_type.count,
+                                        userdata=obj)
+                    inner_fcode.arg(cap.replaced_name, inner_cpp_type, userdata=obj)
                     for rr in cap.replace_range_pairs:
                         replace = Replace(cap.replaced_name, *rr)
                         replaces.append(replace)
@@ -727,7 +728,8 @@ class InlineBuilder:
                         v, self.plugins, user_arg=user_arg)
                     container_fcode.arg(k,
                                         str(mapped_cpp_type),
-                                        array=mapped_cpp_type.count)
+                                        array=mapped_cpp_type.count,
+                                        userdata=v)
                     args.append(v)
 
                 inner_code_str = execute_modifiers(code_str, replaces)

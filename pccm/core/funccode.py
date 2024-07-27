@@ -9,17 +9,21 @@ class Argument(object):
                  array: Optional[Union[int, str]] = None,
                  pyanno: Optional[str] = None,
                  doc: Optional[str] = None,
-                 attrs: Optional[List[Attr]] = None):
+                 user_attrs: Optional[List[Attr]] = None,
+                 attributes: Optional[List[str]] = None,
+                 userdata: Any = None):
         self.name = name.strip()
         self.type_str = str(type).strip()  # type: str
         self.default = default
         self.array = array
         self.pyanno = pyanno
         self.doc = doc
-        if attrs is None:
+        if user_attrs is None:
             self.attrs: List[Attr] = []
         else:
-            self.attrs: List[Attr] = attrs
+            self.attrs: List[Attr] = user_attrs
+        self.attributes = attributes
+        self.userdata = userdata
         if pyanno is not None:
             self.pyanno = pyanno.strip()
             assert len(pyanno) != 0
