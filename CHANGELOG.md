@@ -1,4 +1,11 @@
 # Changelog
+## [0.4.14] - 2024-07-31
+### Fixed
+- fix a bug in simple type analysis
+### Added 
+- add metal constant filter in type analysis
+- add numpy scalar type support in type analysis
+
 ## [0.4.13] - 2024-07-27
 ### Added
 - add attributes and `code_before_func_def` support for apple metal

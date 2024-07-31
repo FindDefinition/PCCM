@@ -1,5 +1,6 @@
 import ast
 from collections import OrderedDict
+import dataclasses
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -117,8 +118,15 @@ def _anno_parser(node: ast.AST, imports: List[str],
         msg += "but we get ast node {}".format(ast.dump(node))
         raise ValueError(msg)
 
-
+@dataclasses.dataclass
 class TemplateTypeStmt(object):
+    name: str
+    args: List["TemplateTypeStmt"]
+    not_template: bool
+    invalid: bool = False
+    exist_anno: str = ""
+    is_ptr: bool = False
+    
     NameToHandler = {
         "int":
         lambda args: "int",
@@ -198,20 +206,6 @@ class TemplateTypeStmt(object):
         lambda args: args[0].to_pyanno(),
     }  # type: Dict[str, Callable[[List["TemplateTypeStmt"]], str]]
 
-    def __init__(self,
-                 name: str,
-                 args: List["TemplateTypeStmt"],
-                 not_template: bool,
-                 invalid: bool = False,
-                 exist_anno: str = "",
-                 is_ptr: bool = False):
-        self.name = name
-        self.args = args
-        self.not_template = not_template
-        self.invalid = invalid
-        self.exist_anno = exist_anno
-        self.is_ptr = is_ptr
-
     def to_pyanno(self) -> str:
         if self.invalid:
             return "Any"
@@ -232,8 +226,18 @@ def _simple_template_type_parser_recursive(
         stmt: str, begin: int, end: int, bracket_pair: Dict[int, int],
         exist_annos: Dict[str, str]) -> TemplateTypeStmt:
     # remove const
-    if stmt[:5] == "const" and stmt[5] == " ":
+    if stmt[begin:begin + 5] == "const" and stmt[begin + 5] == " ":
         begin += 5
+    # remove constant, thread, threadgroup, device in metal
+    if stmt[begin:begin + 8] == "constant" and stmt[begin + 8] == " ":
+        begin += 8
+    if stmt[begin:begin + 6] == "thread" and stmt[begin + 6] == " ":
+        begin += 6
+    if stmt[begin:begin + 11] == "threadgroup" and stmt[begin + 11] == " ":
+        begin += 11
+    if stmt[begin:begin + 6] == "device" and stmt[begin + 6] == " ":
+        begin += 6
+
     # remove tailing const, pointer and ref
     is_ptr = False 
     if stmt.endswith("__restrict__"):
@@ -247,7 +251,6 @@ def _simple_template_type_parser_recursive(
         end -= 1
     elif stmt[-1] == "&":
         end -= 1
-
     stmt = stmt[:end]
     stmt2 = stmt.strip()
     end -= len(stmt) - len(stmt2)

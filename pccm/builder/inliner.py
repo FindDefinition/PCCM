@@ -26,6 +26,7 @@ from pccm.middlewares.pybind import Pybind11MethodMeta
 from pccm.source.core import Replace, Source, execute_modifiers
 from pccm.utils import UniqueNamePool, get_qualname_of_type
 import difflib
+import numpy as np 
 
 PCCM_INLINE_MODULE_NAME = "__pccm_inline_module"
 PCCM_INLINE_FUNCTION_NAME = "__pccm_inline_function"
@@ -51,12 +52,14 @@ def gcs(*instances):
 def get_base_type_string(obj):
     if isinstance(obj, int):
         return "int64_t", False
-    elif isinstance(obj, float):
+    elif isinstance(obj, (float, np.floating)):
         return "float", False
-    elif isinstance(obj, bool):
+    elif isinstance(obj, (bool, )):
         return "bool", False
     elif isinstance(obj, str):
         return "std::string", False
+    elif isinstance(obj, np.integer):
+        return "int64_t", False
     else:
         return get_qualname_of_type(type(obj)), True
 

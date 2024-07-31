@@ -28,6 +28,9 @@ class Argument(object):
             self.pyanno = pyanno.strip()
             assert len(pyanno) != 0
 
+    def copy(self):
+        return Argument(self.name, self.type_str, self.default, self.array, self.pyanno, self.doc, self.attrs, self.attributes, self.userdata)
+
 class TemplateTypeArgument(object):
     def __init__(self,
                  name: str,
