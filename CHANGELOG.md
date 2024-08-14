@@ -1,4 +1,8 @@
 # Changelog
+## [0.4.15] - 2024-08-14
+### Added
+- add compiled conversion to greatly reduce launch overhead of inline function. currently only inline cuda/metal kernels in cumm support this.
+
 ## [0.4.14] - 2024-07-31
 ### Fixed
 - fix a bug in simple type analysis

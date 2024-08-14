@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from ccimport.buildmeta import _unique_list_keep_order
 
 import pccm
 from pccm.core.funccode import Argument
@@ -26,7 +27,7 @@ from pccm.middlewares.pybind import Pybind11MethodMeta
 from pccm.source.core import Replace, Source, execute_modifiers
 from pccm.utils import UniqueNamePool, get_qualname_of_type
 import difflib
-import numpy as np 
+import numpy as np
 
 PCCM_INLINE_MODULE_NAME = "__pccm_inline_module"
 PCCM_INLINE_FUNCTION_NAME = "__pccm_inline_function"
@@ -120,7 +121,7 @@ class PreCaptureFunctionCode(FunctionCode):
     def capture_vars(self, *, _frame_cnt: int = 2):
         if self._cached_inited:
             yield
-            return 
+            return
         cur_frame = inspect.currentframe()
         assert cur_frame is not None
         frame = cur_frame
@@ -171,6 +172,14 @@ class InlineBuilderPlugin:
 
     def type_conversion(self, obj: Any, user_arg: Optional[Any] = None):
         return obj
+
+    def type_conversion_code(
+            self,
+            obj: Any,
+            src_name: str,
+            tgt_name: str,
+            user_arg: Optional[Any] = None) -> Optional[Tuple[str, List[str]]]:
+        return None
 
     def get_cpp_type(
             self,
@@ -329,13 +338,70 @@ def get_save_file(path: Path):
     pid = os.getpid()
 
 
+def _non_nested_compile(
+        tgt_name: str,
+        local_var_name: str,
+        obj_type: BaseType,
+        obj,
+        cap: CaptureStmt,
+        plugins: Dict[str, InlineBuilderPlugin],
+        user_arg: Optional[Any] = None) -> Tuple[str, List[str]]:
+    if cap.is_expr:
+        val_stmt = f"eval(\"{cap.name}\", {local_var_name})"
+    else:
+        val_stmt = f"{local_var_name}[\"{cap.name}\"]"
+    qualname = obj_type.qualname
+    if qualname in plugins:
+        plugin = plugins[qualname]
+        code_res = plugin.type_conversion_code(obj, val_stmt, tgt_name,
+                                               user_arg)
+        assert code_res is not None, "you must provide conversion code for custom type."
+        return code_res
+    if obj_type.is_std_type():
+        return f"{tgt_name} = {val_stmt}", []
+    if not qualname.startswith("std"):
+        # custom type
+        if qualname not in plugins:
+            msg = f"can't find {qualname} in plugins, available: {plugins.keys()}"
+            raise ValueError(msg)
+        plugin = plugins[qualname]
+        code_res = plugin.type_conversion_code(obj, val_stmt, tgt_name,
+                                               user_arg)
+        assert code_res is not None, "you must provide conversion code for custom type."
+        # if code is None:
+        #     return f"{tgt_name} = {val_stmt}"
+        return code_res
+    else:
+        raise NotImplementedError("don't support STL containers.")
+
+
+def _get_non_nested_conversion_func_code(stmts: List[str],
+                                         import_stmts: List[str],
+                                         func_name: str):
+    block = "\n".join(stmts)
+    # add indent to block
+    block = "\n".join([f"    {line}" for line in block.split("\n")])
+    stmt_list = ", ".join(f"{PCCM_INLINE_ARG_PREFIX}_{i}"
+                          for i in range(len(stmts)))
+    import_block = "\n".join(import_stmts)
+    return f"""
+{import_block}
+def {func_name}(local_vars):
+{block}
+    return [{stmt_list}]
+    """
+
+
 def _nested_apply_plugin_transform(obj_type: BaseType,
                                    obj,
                                    plugins: Dict[str, InlineBuilderPlugin],
                                    user_arg: Optional[Any] = None):
+    qualname = obj_type.qualname
+    if qualname in plugins:
+        plugin = plugins[qualname]
+        return plugin.type_conversion(obj, user_arg)
     if obj_type.is_std_type():
         return obj
-    qualname = obj_type.qualname
     if not qualname.startswith("std"):
         # custom type
         if qualname not in plugins:
@@ -443,15 +509,22 @@ class InlineClass(Class):
 
 class _ModuleMeta:
 
-    def __init__(self, func: Any, captures: List[CaptureStmt],
-                 capture_ctypes: List[BaseType], inner_code: str,
-                 kernel_code: str, raw_code: str) -> None:
+    def __init__(self,
+                 func: Any,
+                 captures: List[CaptureStmt],
+                 capture_ctypes: List[BaseType],
+                 inner_code: str,
+                 kernel_code: str,
+                 raw_code: str,
+                 compiled_conversion_func=None) -> None:
         self.func = func
         self.captures = captures
         self.capture_ctypes = capture_ctypes
         self.inner_code = inner_code
         self.kernel_code = kernel_code
         self.user_raw_code = raw_code
+
+        self._compiled_conversion_func = compiled_conversion_func
 
 
 class InlineBuilder:
@@ -549,7 +622,8 @@ class InlineBuilder:
         return None
 
     def _get_inline_func_name_for_debug(self, name: str):
-        return PCCM_INLINE_FUNCTION_NAME_FORMAT.format(re.sub('[^0-9a-zA-Z]', '_', name))
+        return PCCM_INLINE_FUNCTION_NAME_FORMAT.format(
+            re.sub('[^0-9a-zA-Z]', '_', name))
 
     def _get_debug_name(self, name: str):
         return re.sub('[^0-9a-zA-Z]', '_', name)
@@ -574,9 +648,14 @@ class InlineBuilder:
 
         return getattr(
             getattr(getattr(mod, PCCM_INLINE_NAMESPACE),
-                    PCCM_INLINE_CLASS_NAME), self._get_inline_func_name_for_debug(name))
+                    PCCM_INLINE_CLASS_NAME),
+            self._get_inline_func_name_for_debug(name))
 
-    def run_func(self, name: str, func, *args, user_args: Optional[Any] = None):
+    def run_func(self,
+                 name: str,
+                 func,
+                 *args,
+                 user_args: Optional[Any] = None):
         return func(*args)
 
     def get_base_class(self):
@@ -591,13 +670,19 @@ class InlineBuilder:
                _frame_cnt: int = 1,
                user_arg: Optional[Any] = None,
                timeout: float = 999999.0,
-               disable_cache: bool = False):
+               disable_cache: bool = False,
+               generate_non_nested_code: bool = False):
         """use $var to capture python objects, use $(var.shape[0]) to capture anonymous expr.
         use different to handle different arg types.
         ~20-100us run overhead. 
         only support: 
         1. int/float/str and nested containers of int/float/str.
         2. custom type via plugins
+
+        Args:
+            generate_non_nested_code: if True, we assume your inputs don't contains any nested 
+                STL container (e.g. inline cuda kernels), so we can compile conversion code
+                to make conversion faster.
         """
         if isinstance(code, FunctionCode):
             code_str = code.inspect_body()
@@ -609,15 +694,20 @@ class InlineBuilder:
         if additional_vars is None:
             additional_vars = {}
         cur_frame = inspect.currentframe()
-        assert cur_frame is not None
-        frame = cur_frame
-        while _frame_cnt > 0:
-            frame = cur_frame.f_back
-            assert frame is not None
-            cur_frame = frame
-            _frame_cnt -= 1
-        del frame
-        local_vars = cur_frame.f_locals.copy()
+        if _frame_cnt == 2:
+            # common path optimization
+            local_vars = cur_frame.f_back.f_back.f_locals.copy()
+        else:
+            assert cur_frame is not None
+            frame = cur_frame
+            while _frame_cnt > 0:
+                frame = cur_frame.f_back
+                assert frame is not None
+                cur_frame = frame
+                _frame_cnt -= 1
+            del frame
+            local_vars = cur_frame.f_locals.copy()
+
         local_vars.update(additional_vars)
         code_path = cur_frame.f_code.co_filename
         lineno = cur_frame.f_lineno
@@ -640,7 +730,11 @@ class InlineBuilder:
                         exist = data.user_raw_code == code_str
                         if not exist and self.show_diff_when_reload:
                             print("---{name} reloaded---".format(name=name))
-                            print(name, "\n".join(difflib.unified_diff(data.user_raw_code.split("\n"), code_str.split("\n"))))
+                            print(
+                                name, "\n".join(
+                                    difflib.unified_diff(
+                                        data.user_raw_code.split("\n"),
+                                        code_str.split("\n"))))
             if not exist:
                 # 1. extract captured vars
                 all_captures = _get_captures_in_code(code_str)
@@ -652,7 +746,10 @@ class InlineBuilder:
                 name_pool = UniqueNamePool()
                 replaces: List[Replace] = []
                 capture_bts: List[BaseType] = []
-                for cap in all_captures:
+
+                non_nested_stmts: List[str] = []
+                non_nested_import_stmts: List[str] = []
+                for cap_idx, cap in enumerate(all_captures):
                     if cap.name in pre_capture_map:
                         obj = pre_capture_map[cap.name]
                     else:
@@ -681,6 +778,13 @@ class InlineBuilder:
                         )
                         raise
                     prev_obj = obj
+                    if generate_non_nested_code:
+                        non_nested_stmt, import_stmts = _non_nested_compile(
+                            f"{PCCM_INLINE_ARG_PREFIX}_{cap_idx}",
+                            "local_vars", cpp_type, obj, cap, self.plugins,
+                            user_arg)
+                        non_nested_stmts.append(non_nested_stmt)
+                        non_nested_import_stmts.extend(import_stmts)
                     obj = _nested_apply_plugin_transform(
                         cpp_type, obj, self.plugins, user_arg)
                     if cap.is_expr:
@@ -710,8 +814,8 @@ class InlineBuilder:
                                     new_arg_name = PCCM_INLINE_ARG_PREFIX + arg_name
                                     plugin.prepare_argument(
                                         container_fcode, new_arg_name,
-                                        arg_name, mapped_cpp_type_str, prev_obj,
-                                        user_arg)
+                                        arg_name, mapped_cpp_type_str,
+                                        prev_obj, user_arg)
                                     arg_name = new_arg_name
                     del prev_obj
                     capture_bts.append(cpp_type)
@@ -722,10 +826,13 @@ class InlineBuilder:
                                         mapped_cpp_type_str,
                                         array=mapped_cpp_type.count,
                                         userdata=obj)
-                    inner_fcode.arg(cap.replaced_name, inner_cpp_type, userdata=obj)
+                    inner_fcode.arg(cap.replaced_name,
+                                    inner_cpp_type,
+                                    userdata=obj)
                     for rr in cap.replace_range_pairs:
                         replace = Replace(cap.replaced_name, *rr)
                         replaces.append(replace)
+                cnt_addi = len(non_nested_stmts)
                 for k, v in additional_vars.items():
                     _, mapped_cpp_type = nested_type_analysis(
                         v, self.plugins, user_arg=user_arg)
@@ -734,6 +841,26 @@ class InlineBuilder:
                                         array=mapped_cpp_type.count,
                                         userdata=v)
                     args.append(v)
+                    if generate_non_nested_code:
+                        non_nested_stmt, import_stmts = _non_nested_compile(
+                            f"{PCCM_INLINE_ARG_PREFIX}_{cnt_addi}",
+                            "local_vars", mapped_cpp_type, v,
+                            CaptureStmt(k, False, (0, 0),
+                                        []), self.plugins, user_arg)
+                        non_nested_stmts.append(non_nested_stmt)
+                        non_nested_import_stmts.extend(import_stmts)
+                    cnt_addi += 1
+                func_obj = None
+                if generate_non_nested_code:
+                    func_code = _get_non_nested_conversion_func_code(
+                        non_nested_stmts,
+                        _unique_list_keep_order(non_nested_import_stmts),
+                        PCCM_INLINE_FUNCTION_NAME)
+                    # print(func_code)
+                    func_code_obj = compile(func_code, "<string>", "exec")
+                    globals_container = {}
+                    exec(func_code_obj, globals_container)
+                    func_obj = globals_container[PCCM_INLINE_FUNCTION_NAME]
 
                 inner_code_str = execute_modifiers(code_str, replaces)
 
@@ -752,10 +879,11 @@ class InlineBuilder:
                                 if cap.name in pre_capture_map:
                                     obj = pre_capture_map[cap.name]
                                 else:
-                                    if not cap.is_expr: 
+                                    if not cap.is_expr:
                                         if cap.name not in local_vars:
                                             raise ValueError(
-                                                f"can't find your capture {cap.name} in prev frame.")
+                                                f"can't find your capture {cap.name} in prev frame."
+                                            )
                                         obj = local_vars[cap.name]
                                     else:
                                         for cap_name in cap.expr_names:
@@ -770,7 +898,8 @@ class InlineBuilder:
                                 args.append(obj)
                             for v in additional_vars.values():
                                 args.append(v)
-                            return self.run_func(name, func,
+                            return self.run_func(name,
+                                                 func,
                                                  *args,
                                                  user_args=user_arg)
                 if isinstance(code, FunctionCode):
@@ -833,46 +962,61 @@ class InlineBuilder:
                 func = self.build(pccm_class, mod_root, name, timeout,
                                   user_arg)
                 if not disable_cache:
-                    code_for_inspect = "\n".join(pccm.core.generate_code(container_fcode.get_impl(self._get_inline_func_name_for_debug(name), meta), 0, 2))
+                    code_for_inspect = "\n".join(
+                        pccm.core.generate_code(
+                            container_fcode.get_impl(
+                                self._get_inline_func_name_for_debug(name),
+                                meta), 0, 2))
                     module_meta = _ModuleMeta(func, all_captures, capture_bts,
                                               inner_code_str, code_for_inspect,
-                                              code_str)
+                                              code_str, func_obj)
                     self.modules[unique_key] = module_meta
                     # self.cached_captures[unique_key] = all_captures
                     # self.cached_capture_ctypes[unique_key] = capture_bts
                     self.used_names.add(key)
                     # breakpoint()
-                return self.run_func(name, func, *args, user_args=user_arg)
-
+                if module_meta._compiled_conversion_func is not None:
+                    args = module_meta._compiled_conversion_func(local_vars)
+                    return self.run_func(name, func, *args, user_args=user_arg)
+                else:
+                    return self.run_func(name, func, *args, user_args=user_arg)
         # module already loaded. just run it after transform.
         module_meta = self.modules[unique_key]
         func = module_meta.func
-        all_captures = module_meta.captures
-        all_base_types = module_meta.capture_ctypes
-        args = []
-        for cap, bt in zip(all_captures, all_base_types):
-            if cap.name in pre_capture_map:
-                obj = pre_capture_map[cap.name]
-            else:
-                if not cap.is_expr:
-                    if cap.name not in local_vars:
-                        raise ValueError(
-                            f"can't find your capture {cap.name} in prev frame."
-                        )
-                    obj = local_vars[cap.name]
+        t_total = 0
+        if module_meta._compiled_conversion_func is not None:
+            t_tr = time.time_ns()
+            args = module_meta._compiled_conversion_func(local_vars)
+            t_total = time.time_ns() - t_tr
+        else:
+            all_captures = module_meta.captures
+            all_base_types = module_meta.capture_ctypes
+            args = []
+            for cap, bt in zip(all_captures, all_base_types):
+                if cap.name in pre_capture_map:
+                    obj = pre_capture_map[cap.name]
                 else:
-                    for cap_name in cap.expr_names:
-                        if cap_name not in local_vars:
+                    if not cap.is_expr:
+                        if cap.name not in local_vars:
                             raise ValueError(
-                                f"can't find your capture {cap_name} in prev frame."
+                                f"can't find your capture {cap.name} in prev frame."
                             )
-                    # eval expr in prev frame
-                    obj = eval(cap.name, local_vars)
-            obj = _nested_apply_plugin_transform(bt, obj, self.plugins,
-                                                 user_arg)
-            args.append(obj)
-        for v in additional_vars.values():
-            args.append(v)
+                        obj = local_vars[cap.name]
+                    else:
+                        for cap_name in cap.expr_names:
+                            if cap_name not in local_vars:
+                                raise ValueError(
+                                    f"can't find your capture {cap_name} in prev frame."
+                                )
+                        # eval expr in prev frame
+                        obj = eval(cap.name, local_vars)
+                t_tr = time.time_ns()
+                obj = _nested_apply_plugin_transform(bt, obj, self.plugins,
+                                                     user_arg)
+                t_total += time.time_ns() - t_tr
+                args.append(obj)
+            for v in additional_vars.values():
+                args.append(v)
         return self.run_func(name, func, *args, user_args=user_arg)
 
     def search_codes_by_name(self, name: str):
@@ -880,7 +1024,7 @@ class InlineBuilder:
         for k, v in self.modules.items():
             if name == k[1]:
                 res.append(v.kernel_code)
-        return res 
+        return res
 
 def main():
     print(_expr_str_to_identifier("a.shape[0] + 5"))
