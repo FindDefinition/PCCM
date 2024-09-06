@@ -1,4 +1,9 @@
 # Changelog
+## [0.4.16] - 2024-09-06
+### Fixed
+- fix a bug that bool is captured as int64_t in inliner.
+- fix a bug of additional vars in inliner.
+
 ## [0.4.15] - 2024-08-14
 ### Added
 - add compiled conversion to greatly reduce launch overhead of inline function. currently only inline cuda/metal kernels in cumm support this.
