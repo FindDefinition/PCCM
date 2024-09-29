@@ -1,5 +1,7 @@
 import abc
+from ast import arg
 import contextlib
+import copy
 import difflib
 import functools
 import inspect
@@ -532,6 +534,30 @@ class FunctionCode(object):
         self._type_to_hook: Dict[str, FuncArgAttrHandler] = {}
 
         self.func_name_override: Optional[str] = None 
+
+    def copy(self) -> "FunctionCode":
+        res = FunctionCode()
+        res.arguments = [arg.copy() for arg in self.arguments]
+        res.return_type = self.return_type
+        res.ctor_inits = self.ctor_inits.copy()
+        res._template_arguments = [t.copy() for t in self._template_arguments]
+        res._blocks = copy.deepcopy(self._blocks)
+        if self._blocks_capture is not None:
+            res._blocks_capture = copy.deepcopy(self._blocks_capture)
+        res.ret_doc = self.ret_doc
+        res.ret_pyanno = self.ret_pyanno
+        res.func_doc = self.func_doc
+        res.code_before_include = self.code_before_include
+        res.code_after_include = self.code_after_include
+        res.code_in_ns = self.code_in_ns
+        res.code_before_func_def = self.code_before_func_def
+        res._additional_pre_attrs = self._additional_pre_attrs.copy()
+        res._impl_only_deps = self._impl_only_deps.copy()
+        res._impl_only_pdeps = self._impl_only_pdeps.copy()
+        res._invalid = self._invalid
+        res._type_to_hook = self._type_to_hook.copy()
+        res.func_name_override = self.func_name_override
+        return res
 
     def is_template(self) -> bool:
         return len(self._template_arguments) > 0

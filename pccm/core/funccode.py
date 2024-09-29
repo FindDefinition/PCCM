@@ -56,6 +56,9 @@ class TemplateTypeArgument(object):
             res += " = {}".format(self.default)
         return res
 
+    def copy(self):
+        return TemplateTypeArgument(self.name, self.default, self.template, self.packed)
+
 class TemplateNonTypeArgument(object):
     def __init__(self,
                  name: str,
@@ -77,3 +80,6 @@ class TemplateNonTypeArgument(object):
         if self.default:
             res += " = {}".format(self.default)
         return res
+
+    def copy(self):
+        return TemplateNonTypeArgument(self.name, self.type, self.default, self.packed)
